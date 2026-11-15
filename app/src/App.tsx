@@ -196,12 +196,13 @@ export default function App() {
     async (path: string, opts: { password?: string; only?: string[]; parent?: string; allowPrograms?: boolean; title?: string } = {}): Promise<boolean> => {
       let dest: string;
       let result: string;
+      let strip: string | null = null;
       try {
         if (opts.parent) {
           dest = `${opts.parent}${sep(path)}${stripArchiveExt(baseName(path))}`;
           result = dest;
         } else {
-          ({ dest, result } = await suggestExtractDest(path, opts.password));
+          ({ dest, result, strip } = await suggestExtractDest(path, opts.password));
         }
       } catch (err) {
         const e = asUiError(err);
@@ -227,6 +228,7 @@ export default function App() {
           overwrite: false,
           allowPrograms: opts.allowPrograms ?? true,
           only: opts.only ?? [],
+          strip,
         });
         remember(path);
         setToast({

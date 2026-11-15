@@ -198,21 +198,37 @@ fn smart_extract_destination() {
     let one_folder = t.path().join("one.zip");
     pack(&[src.clone()], &one_folder, &PackOptions::default(), &mut |_| {}, None).unwrap();
     let info = inspect(&one_folder, None).unwrap();
-    // "Photos" already exists next to the archive, so it falls back to a new folder.
-    let (dest, result) = suggest_dest(&one_folder, &info);
-    assert_eq!(dest, t.path().join("one"));
-    assert_eq!(result, dest);
+    // "Photos" already exists next to the archive: unpack its contents into "Photos (2)", flat.
+    let target = suggest_dest(&one_folder, &info);
+    assert_eq!(target.dest, t.path().join("Photos (2)"));
+    assert_eq!(target.strip.as_deref(), Some("Photos/"));
+    let opts = ExtractOptions { strip: target.strip.clone(), ..Default::default() };
+    extract(&one_folder, &target.dest, &opts, &mut |_| {}, None).unwrap();
+    assert!(t.path().join("Photos (2)/notes.txt").exists(), "no extra Photos level");
+    assert!(!t.path().join("Photos (2)/Photos").exists());
     fs::rename(&src, t.path().join("moved")).unwrap();
-    let (dest, result) = suggest_dest(&one_folder, &info);
-    assert_eq!(dest, t.path());
-    assert_eq!(result, t.path().join("Photos"));
+    fs::remove_dir_all(t.path().join("Photos (2)")).unwrap();
+    let target = suggest_dest(&one_folder, &info);
+    assert_eq!((target.dest.as_path(), target.result.clone(), target.strip.clone()), (t.path(), t.path().join("Photos"), None));
 
     let loose = t.path().join("loose.zip");
     evil_zip(&loose, &["a.txt", "b.txt"], b"x");
     let info = inspect(&loose, None).unwrap();
     fs::create_dir_all(t.path().join("loose")).unwrap();
-    let (dest, _) = suggest_dest(&loose, &info);
-    assert_eq!(dest, t.path().join("loose (2)"));
+    assert_eq!(suggest_dest(&loose, &info).dest, t.path().join("loose (2)"));
+
+    // Conflicts: skip (default), keep both, replace.
+    let d = t.path().join("c");
+    extract(&loose, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    fs::write(d.join("a.txt"), "mine").unwrap();
+    let r = extract(&loose, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    assert_eq!((r.files, r.skipped.len()), (0, 2));
+    assert_eq!(fs::read(d.join("a.txt")).unwrap(), b"mine");
+    extract(&loose, &d, &ExtractOptions { on_conflict: Conflict::Rename, ..Default::default() }, &mut |_| {}, None).unwrap();
+    assert_eq!(fs::read(d.join("a (2).txt")).unwrap(), b"x");
+    assert_eq!(fs::read(d.join("a.txt")).unwrap(), b"mine");
+    extract(&loose, &d, &ExtractOptions { on_conflict: Conflict::Overwrite, ..Default::default() }, &mut |_| {}, None).unwrap();
+    assert_eq!(fs::read(d.join("a.txt")).unwrap(), b"x");
 }
 
 /// Over 4 GB (needs ZIP64). Slow and writes ~9 GB of temporary data, so run it on demand:

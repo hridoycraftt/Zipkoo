@@ -33,6 +33,8 @@ type PeekState =
 
 export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipPrograms, onExtract, onClose, ctx, onShare, onUpdate, onConvert, revision }: Props) {
   const [tab, setTab] = useState<"preview" | "history" | "health">("preview");
+  // Below 1020 px the side panel becomes a drawer opened from the toolbar.
+  const [drawer, setDrawer] = useState(false);
   const [versions, setVersions] = useState<Version[] | null>(null);
   const isZip = info.format === "zip";
   useEffect(() => {
@@ -110,7 +112,7 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
   const n = (v: number) => num(v, lang);
 
   return (
-    <div className="archive">
+    <div className={`archive ${drawer ? "drawer-open" : ""}`}>
       <section className="main-col" aria-label={baseName(info.path)}>
         <header className="ahead">
           <div className="ahead-text">
@@ -147,6 +149,7 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
             <input id="archive-search" placeholder={t("search")} value={query} onChange={(e) => setQuery(e.target.value)} />
           </label>
           <div className="tool-buttons">
+            <button className="btn icon-btn narrow-only" onClick={() => setDrawer(true)} title={t("previewTitle")} aria-label={t("previewTitle")} aria-expanded={drawer}><Icon name="image" size={18} /></button>
             <button className="btn icon-btn" onClick={onShare} title={t("shareLink")} aria-label={t("shareLink")}><Icon name="lock" size={18} /></button>
             {isZip && <button className="btn icon-btn" onClick={onUpdate} title={`${t("updateArchive")} ${t("updateHint")}`} aria-label={t("updateArchive")}><Icon name="pack" size={18} /></button>}
             <button className="btn icon-btn" onClick={onConvert} title={t("convertThis")} aria-label={t("convertThis")}><Icon name="zip" size={18} /></button>
@@ -227,11 +230,15 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
         </footer>
       </section>
 
+      {drawer && <div className="drawer-veil narrow-only" onClick={() => setDrawer(false)} aria-hidden="true" />}
       <aside className="peek" aria-label={t("previewTitle")}>
+        <div className="tabs-row">
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === "preview"} className={tab === "preview" ? "on" : ""} onClick={() => setTab("preview")}>{t("previewTitle")}</button>
           {isZip && <button role="tab" aria-selected={tab === "history"} className={tab === "history" ? "on" : ""} onClick={() => setTab("history")}>{t("history")}</button>}
           <button role="tab" aria-selected={tab === "health"} className={tab === "health" ? "on" : ""} onClick={() => setTab("health")}>{t("repair")}</button>
+        </div>
+        <button className="btn quiet icon-btn narrow-only" onClick={() => setDrawer(false)} aria-label={t("close")} title={t("close")}><Icon name="x" size={18} /></button>
         </div>
         {tab === "history" && (
           <ol className="versions">

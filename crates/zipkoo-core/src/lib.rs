@@ -26,7 +26,7 @@ pub mod split;
 pub mod update;
 
 pub use error::{Error, Result};
-pub use extract::{extract, suggest_dest, ExtractOptions, ExtractReport};
+pub use extract::{extract, suggest_dest, Conflict, ExtractOptions, ExtractReport, ExtractTarget};
 pub use format::Format;
 pub use inspect::{inspect, peek, ArchiveInfo, Entry};
 pub use pack::{pack, unique_path, Level, PackOptions, PackReport};

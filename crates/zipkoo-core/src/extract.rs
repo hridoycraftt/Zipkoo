@@ -21,6 +21,22 @@ pub struct ExtractOptions<'a> {
     pub allow_executables: bool,
     /// Only extract these entry names. Empty means everything.
     pub only: Vec<String>,
+    /// Remove this leading folder (e.g. "Project/") from every entry name, so a single top folder
+    /// can be unpacked straight into a new folder instead of nesting it one level deeper.
+    pub strip: Option<String>,
+    /// What to do when a file already exists at the destination.
+    pub on_conflict: Conflict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Conflict {
+    /// Leave the existing file and report the entry as skipped.
+    #[default]
+    Skip,
+    Overwrite,
+    /// Keep both: the new file gets " (2)", " (3)"...
+    Rename,
 }
 
 impl Default for ExtractOptions<'_> {
@@ -33,6 +49,8 @@ impl Default for ExtractOptions<'_> {
             hard_cap: None,
             allow_executables: true,
             only: Vec::new(),
+            strip: None,
+            on_conflict: Conflict::Skip,
         }
     }
 }
@@ -68,6 +86,25 @@ impl Ctx<'_, '_, '_> {
         if !self.wanted(name) {
             return Ok(None);
         }
+        let stripped;
+        let name = match &self.opts.strip {
+            Some(prefix) => {
+                let n = name.trim_start_matches("./");
+                match n.strip_prefix(prefix.as_str()) {
+                    Some(rest) if !rest.is_empty() => {
+                        stripped = rest.to_string();
+                        stripped.as_str()
+                    }
+                    // The top folder itself: just make sure the destination exists.
+                    _ if n.trim_end_matches('/') == prefix.trim_end_matches('/') => {
+                        fs::create_dir_all(self.dest)?;
+                        return Ok(None);
+                    }
+                    _ => name,
+                }
+            }
+            None => name,
+        };
         let out = match safe_join(self.dest, name) {
             Ok(p) => p,
             Err(_) => {
@@ -83,10 +120,18 @@ impl Ctx<'_, '_, '_> {
             self.report.skipped.push((name.into(), "program blocked".into()));
             return Ok(None);
         }
-        if out.exists() && !self.opts.overwrite {
-            self.report.skipped.push((name.into(), "already exists".into()));
-            return Ok(None);
-        }
+        let out = if out.exists() {
+            match (self.opts.overwrite, self.opts.on_conflict) {
+                (true, _) | (_, Conflict::Overwrite) => out,
+                (_, Conflict::Rename) => crate::pack::unique_path(&out),
+                (_, Conflict::Skip) => {
+                    self.report.skipped.push((name.into(), "already exists".into()));
+                    return Ok(None);
+                }
+            }
+        } else {
+            out
+        };
         if let Some(parent) = out.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -264,7 +309,17 @@ pub fn extract(
 /// Where "Extract here" should put things. If everything sits in one top folder, extract next to
 /// the archive (the folder is created by the archive itself); otherwise use a folder named after it.
 /// Never reuses an existing path: adds " (2)", " (3)"...
-pub fn suggest_dest(archive: &Path, info: &crate::inspect::ArchiveInfo) -> (PathBuf, PathBuf) {
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ExtractTarget {
+    /// Folder to extract into.
+    pub dest: PathBuf,
+    /// Folder the user sees afterwards.
+    pub result: PathBuf,
+    /// Leading folder to drop from entry names (see `ExtractOptions::strip`).
+    pub strip: Option<String>,
+}
+
+pub fn suggest_dest(archive: &Path, info: &crate::inspect::ArchiveInfo) -> ExtractTarget {
     let parent = archive.parent().unwrap_or(Path::new(".")).to_path_buf();
     let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let name = crate::split::strip_part_suffix(&name).to_string();
@@ -283,11 +338,15 @@ pub fn suggest_dest(archive: &Path, info: &crate::inspect::ArchiveInfo) -> (Path
         && info.entries.iter().any(|e| e.name.trim_start_matches("./").contains('/') || e.is_dir);
     if single_folder {
         let top = tops.into_iter().next().unwrap();
-        if !parent.join(top).exists() {
+        let wanted = parent.join(top);
+        if !wanted.exists() {
             // Extract into the parent; the result is parent/top.
-            return (parent.clone(), parent.join(top));
+            return ExtractTarget { dest: parent.clone(), result: wanted, strip: None };
         }
+        // "Project" is taken: unpack its contents into "Project (2)" (not "Project (2)/Project").
+        let dest = crate::pack::unique_path(&wanted);
+        return ExtractTarget { dest: dest.clone(), result: dest, strip: Some(format!("{top}/")) };
     }
     let dest = crate::pack::unique_path(&parent.join(&stem));
-    (dest.clone(), dest)
+    ExtractTarget { dest: dest.clone(), result: dest, strip: None }
 }

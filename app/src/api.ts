@@ -95,6 +95,8 @@ export interface ExtractRequest {
   overwrite: boolean;
   allowPrograms: boolean;
   only: string[];
+  strip?: string | null;
+  onConflict?: "skip" | "overwrite" | "rename";
 }
 
 export const extractArchive = (job: string, req: ExtractRequest) => invoke<ExtractReport>("extract_archive", { job, req });
@@ -109,7 +111,7 @@ export const onShellActions = (cb: () => void) => listen("shell-actions", cb);
 export const sfxAvailable = () => invoke<boolean>("sfx_available");
 export const suggestPackOutput = (inputs: string[], ext: string) => invoke<string | null>("suggest_pack_output", { inputs, ext });
 export const suggestExtractDest = (path: string, password?: string) =>
-  invoke<{ dest: string; result: string }>("suggest_extract_dest", { path, password: password ?? null });
+  invoke<{ dest: string; result: string; strip: string | null }>("suggest_extract_dest", { path, password: password ?? null });
 export interface ShellStatus { supported: boolean; installed: boolean }
 export const shellStatus = () => invoke<ShellStatus>("shell_status");
 export const shellSet = (enabled: boolean) => invoke<ShellStatus>("shell_set", { enabled });

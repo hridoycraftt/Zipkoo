@@ -75,6 +75,10 @@ struct ExtractRequest {
     overwrite: bool,
     allow_programs: bool,
     only: Vec<String>,
+    #[serde(default)]
+    strip: Option<String>,
+    #[serde(default)]
+    on_conflict: zipkoo_core::Conflict,
 }
 
 fn register(jobs: &Jobs, id: &str) -> Arc<AtomicBool> {
@@ -172,6 +176,8 @@ async fn extract_archive(app: AppHandle, jobs: State<'_, Jobs>, job: String, req
             overwrite: req.overwrite,
             allow_executables: req.allow_programs,
             only: req.only,
+            strip: req.strip,
+            on_conflict: req.on_conflict,
             ..Default::default()
         };
         let mut emit = |p: &Progress| {
@@ -237,21 +243,12 @@ fn suggest_pack_output(inputs: Vec<PathBuf>, ext: String) -> Option<PathBuf> {
     Some(zipkoo_core::unique_path(&parent.join(format!("{name}.{ext}"))))
 }
 
-#[derive(Serialize)]
-struct ExtractTarget {
-    /// Folder to extract into.
-    dest: PathBuf,
-    /// Folder the user will see afterwards.
-    result: PathBuf,
-}
-
 /// "Extract here": skip the extra folder when the archive already has one top folder.
 #[tauri::command]
-async fn suggest_extract_dest(path: PathBuf, password: Option<String>) -> Result<ExtractTarget, UiError> {
+async fn suggest_extract_dest(path: PathBuf, password: Option<String>) -> Result<zipkoo_core::ExtractTarget, UiError> {
     tauri::async_runtime::spawn_blocking(move || {
         let info = zipkoo_core::inspect(&path, password.as_deref())?;
-        let (dest, result) = zipkoo_core::suggest_dest(&path, &info);
-        Ok::<_, zipkoo_core::Error>(ExtractTarget { dest, result })
+        Ok::<_, zipkoo_core::Error>(zipkoo_core::suggest_dest(&path, &info))
     })
     .await
     .map_err(|e| UiError { code: "error", message: e.to_string() })?
