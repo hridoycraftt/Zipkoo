@@ -18,6 +18,7 @@ pub mod optimize;
 pub mod pack;
 pub mod progress;
 pub mod safety;
+pub mod share;
 pub mod sfx;
 pub mod smart;
 pub mod split;

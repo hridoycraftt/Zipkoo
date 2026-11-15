@@ -10,4 +10,4 @@ path = "src/main.rs"
 
 [dependencies]
 zipkoo-core = { path = "../zipkoo-core" }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }

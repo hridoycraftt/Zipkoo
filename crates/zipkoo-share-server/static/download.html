@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Zipkoo · Shared file</title>
+<style>
+  :root {
+    --ink: #14161f; --ink-2: #3f4252; --muted: #646777; --haldi: #f2a93b; --haldi-wash: #fdf1dc;
+    --teal: #17786a; --teal-wash: #e3f2ee; --danger: #b8382f; --canvas: #efeee8; --pane: #fff; --hair: #e6e3db;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+    font: 15px/1.6 "Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink);
+    background: radial-gradient(800px 500px at 90% -10%, rgb(242 169 59 / .16), transparent 60%),
+                radial-gradient(700px 500px at -10% 110%, rgb(23 120 106 / .1), transparent 60%), var(--canvas);
+  }
+  main { width: min(440px, 100%); background: var(--pane); border-radius: 22px; padding: 30px 28px 26px;
+    box-shadow: 0 1px 2px rgb(20 22 31 / .05), 0 24px 60px -20px rgb(40 34 20 / .3); display: flex; flex-direction: column; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 800 20px/1 system-ui, sans-serif; letter-spacing: -.04em; }
+  h1 { margin: 6px 0 0; font-size: 22px; line-height: 1.3; letter-spacing: -.02em; word-break: break-word; }
+  p { margin: 0; color: var(--ink-2); }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13.5px; color: var(--muted); }
+  .facts b { color: var(--ink); font-weight: 600; }
+  .lock { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: var(--teal-wash); color: #0f5148; font-size: 13.5px; }
+  input { width: 100%; height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid #d7d3c8; font: inherit; }
+  input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 4px rgb(23 120 106 / .12); }
+  button { height: 48px; border-radius: 12px; border: 1px solid #e09a2f; font: 600 15px/1 inherit; font-family: inherit; cursor: pointer; color: var(--ink);
+    background: linear-gradient(180deg, #f6b752, var(--haldi)); box-shadow: inset 0 1px 0 rgb(255 255 255 / .45), 0 8px 18px -8px rgb(214 140 30 / .55); }
+  button:disabled { opacity: .55; cursor: default; }
+  .bar { height: 12px; border-radius: 99px; background: #f3f1eb; overflow: hidden; }
+  .bar span { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, var(--haldi) 0 6px, #e39a2c 6px 9px); transition: width .2s; }
+  .err { color: var(--danger); font-weight: 500; }
+  .ok { color: var(--teal); font-weight: 600; }
+  .small { font-size: 12.5px; color: var(--muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <svg width="30" height="30" viewBox="0 0 100 100" aria-hidden="true"><rect x="4" y="4" width="92" height="92" rx="26" fill="#F2A93B"/><path d="M29 30H71L29 70H71" stroke="#14161F" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+    zipkoo
+  </div>
+  <h1 id="title">Someone shared a file with you</h1>
+  <div class="facts" id="facts"></div>
+  <div class="lock">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="flex:none;margin-top:2px"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>
+    <span>End-to-end encrypted. The file is unlocked here in your browser; the server only ever had scrambled data.</span>
+  </div>
+  <form id="pwform" hidden>
+    <label for="pw" class="small">This file is locked. Enter the password you were given.</label>
+    <input id="pw" type="password" autocomplete="off" placeholder="Password">
+  </form>
+  <button id="go" type="button">Download</button>
+  <div class="bar" id="bar" hidden><span></span></div>
+  <p id="status" aria-live="polite"></p>
+  <p class="small">Shared with Zipkoo. Zip it. Ship it.</p>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const parts = location.pathname.split("/");
+  const id = parts[parts.length - 1];
+  const keyB64 = location.hash.slice(1);
+  const human = (n) => { const u = ["B","KB","MB","GB","TB"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return i ? n.toFixed(1) + " " + u[i] : n + " B"; };
+  const b64 = (s) => { s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+  const say = (t, cls) => { const s = $("status"); s.textContent = t; s.className = cls || ""; };
+  let linkKey;
+  try { linkKey = b64(keyB64); if (linkKey.length !== 32) throw 0; } catch { say("This link is incomplete. Ask the sender to copy the whole link, including the part after #.", "err"); $("go").disabled = true; return; }
+
+  fetch(`/api/shares/${id}`).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(m => {
+    const exp = new Date(m.expiresAt * 1000);
+    $("facts").innerHTML = `<span><b>${human(m.size)}</b> encrypted</span><span>Available until <b>${exp.toLocaleString()}</b></span>` +
+      (m.downloadsLeft != null ? `<span><b>${m.downloadsLeft}</b> download${m.downloadsLeft === 1 ? "" : "s"} left</span>` : "");
+  }).catch(() => { say("This link has expired, reached its download limit, or was deleted.", "err"); $("go").disabled = true; });
+
+  // Reads exact byte counts from a fetch stream.
+  function exactReader(stream) {
+    const reader = stream.getReader(); let buf = new Uint8Array(0); let done = false;
+    return async (n) => {
+      while (buf.length < n && !done) {
+        const r = await reader.read();
+        if (r.done) { done = true; break; }
+        const nb = new Uint8Array(buf.length + r.value.length); nb.set(buf); nb.set(r.value, buf.length); buf = nb;
+      }
+      if (buf.length < n) throw new Error("short");
+      const out = buf.slice(0, n); buf = buf.slice(n); return out;
+    };
+  }
+  const nonce = (prefix, ctr) => { const n = new Uint8Array(12); n.set(prefix); new DataView(n.buffer).setUint32(8, ctr >>> 0, false); return n; };
+
+  async function deriveKey(header, password) {
+    const hasPw = header[12] & 1;
+    if (!hasPw) return crypto.subtle.importKey("raw", linkKey, "AES-GCM", false, ["decrypt"]);
+    const salt = header.slice(21, 37);
+    const iters = new DataView(header.buffer, header.byteOffset).getUint32(37, true);
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+    const pk = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: iters, hash: "SHA-256" }, base, 256));
+    const both = new Uint8Array(64); both.set(linkKey); both.set(pk, 32);
+    const k = await crypto.subtle.digest("SHA-256", both);
+    return crypto.subtle.importKey("raw", k, "AES-GCM", false, ["decrypt"]);
+  }
+
+  let pending = null; // {read, header} waiting for a password
+
+  async function proceed(read, header) {
+    const dv = new DataView(header.buffer, header.byteOffset);
+    const chunk = dv.getUint32(8, true), prefix = header.slice(13, 21), metaLen = dv.getUint32(41, true);
+    const metaCt = await read(metaLen);
+    let key, meta;
+    try {
+      key = await deriveKey(header, $("pw").value);
+      meta = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(prefix, 0xffffffff), additionalData: header }, key, metaCt)));
+    } catch {
+      if (header[12] & 1) { pending = { read, header, metaCt }; say("Wrong password. Check Caps Lock and try again.", "err"); $("go").disabled = false; $("go").textContent = "Unlock and download"; return; }
+      throw new Error("key");
+    }
+    const name = (meta.name || "shared-file").split(/[\\/]/).pop();
+    $("title").textContent = name;
+    let sink = null; const parts = [];
+    if (window.showSaveFilePicker) {
+      try { const h = await showSaveFilePicker({ suggestedName: name }); sink = await h.createWritable(); } catch (e) { if (e && e.name === "AbortError") { say("Cancelled."); $("go").disabled = false; return; } }
+    }
+    $("bar").hidden = false;
+    const chunks = Math.max(1, Math.ceil(meta.size / chunk));
+    let done = 0;
+    for (let i = 0; i < chunks; i++) {
+      const plainLen = i + 1 === chunks ? meta.size - i * chunk : chunk;
+      const ct = await read(plainLen + 16);
+      const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(prefix, i), additionalData: new Uint8Array([i + 1 === chunks ? 1 : 0]) }, key, ct));
+      if (sink) await sink.write(pt); else parts.push(pt);
+      done += pt.length;
+      $("bar").firstElementChild.style.width = (meta.size ? (done / meta.size) * 100 : 100) + "%";
+      say(`Unlocking… ${human(done)} of ${human(meta.size)}`);
+    }
+    if (sink) await sink.close();
+    else {
+      const url = URL.createObjectURL(new Blob(parts));
+      const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+    say(`Done. ${name} (${human(meta.size)}) is saved.`, "ok");
+    $("go").hidden = true;
+  }
+
+  $("pwform").addEventListener("submit", (e) => { e.preventDefault(); $("go").click(); });
+  $("go").addEventListener("click", async () => {
+    $("go").disabled = true;
+    try {
+      if (pending) {
+        const p = pending; pending = null;
+        say("Checking the password…");
+        const read = async (n) => { if (p.metaCt) { const m = p.metaCt; p.metaCt = null; if (m.length === n) return m; } return p.read(n); };
+        return await proceed(read, p.header);
+      }
+      say("Starting…");
+      const r = await fetch(`/api/shares/${id}/blob`, { cache: "no-store" });
+      if (!r.ok) { say("This link has expired, reached its download limit, or was deleted.", "err"); return; }
+      const read = exactReader(r.body);
+      const header = await read(45);
+      const magic = new TextDecoder().decode(header.slice(0, 5));
+      if (magic !== "ZKSHR") throw new Error("magic");
+      if ((header[12] & 1) && !$("pw").value) {
+        pending = { read, header };
+        $("pwform").hidden = false; $("pw").focus();
+        $("go").textContent = "Unlock and download"; $("go").disabled = false;
+        say("Enter the password to continue.");
+        return;
+      }
+      await proceed(read, header);
+    } catch (e) {
+      say(e && e.message === "key" ? "This link's key doesn't match the file. Ask the sender for the full link." : "The file couldn't be unlocked. It may have been changed or the download stopped early.", "err");
+      $("go").disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>

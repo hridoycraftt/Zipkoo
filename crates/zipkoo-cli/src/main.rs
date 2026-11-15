@@ -78,6 +78,89 @@ enum Cmd {
         #[arg(long)]
         stub: Option<PathBuf>,
     },
+    /// Share a file with an end-to-end encrypted link
+    Share {
+        file: PathBuf,
+        /// Share server, e.g. https://share.example.com
+        #[arg(long, env = "ZIPKOO_SHARE_SERVER")]
+        server: String,
+        /// Hours until the link stops working
+        #[arg(long, default_value_t = 24)]
+        hours: u32,
+        /// Stop after this many downloads
+        #[arg(long)]
+        downloads: Option<u32>,
+        /// Also require a password
+        #[arg(long)]
+        lock: bool,
+    },
+    /// Download a share link
+    Get {
+        link: String,
+        #[arg(short, long, default_value = ".")]
+        to: PathBuf,
+        #[arg(short, long)]
+        password: Option<String>,
+    },
+    /// Smart Update: add only new and changed files to a ZIP (keeps history)
+    Update {
+        archive: PathBuf,
+        inputs: Vec<PathBuf>,
+        /// Remove files that are no longer in the inputs
+        #[arg(long)]
+        remove_missing: bool,
+        #[arg(long)]
+        no_history: bool,
+        #[arg(short, long)]
+        password: Option<String>,
+    },
+    /// Show an archive's version history
+    History { archive: PathBuf },
+    /// Self-heal: add repair data, check, or repair an archive
+    Heal {
+        archive: PathBuf,
+        /// Create a repair file with this much redundancy (percent)
+        #[arg(long)]
+        create: Option<u8>,
+        /// Repair damaged blocks
+        #[arg(long)]
+        repair: bool,
+    },
+    /// Convert archives to another format (works on many files)
+    Convert {
+        archives: Vec<PathBuf>,
+        #[arg(short, long, value_enum, default_value = "7z")]
+        format: Fmt,
+        #[arg(short, long)]
+        password: Option<String>,
+    },
+    /// Snapshot a folder into a backup folder (skips if nothing changed)
+    Backup {
+        folder: PathBuf,
+        dest: PathBuf,
+        #[arg(long, default_value_t = 10)]
+        keep: usize,
+        #[arg(long)]
+        repair: Option<u8>,
+    },
+    /// Search file names inside every archive under a folder
+    Search {
+        query: String,
+        #[arg(long, default_value = ".")]
+        r#in: PathBuf,
+    },
+    /// Find identical files
+    Dupes { inputs: Vec<PathBuf> },
+    /// Shrink photos into a copy, ready to pack
+    Shrink {
+        inputs: Vec<PathBuf>,
+        #[arg(short, long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 2560)]
+        max_edge: u32,
+        #[arg(long, default_value_t = 82)]
+        quality: u8,
+    },
     /// Print the SHA-256 of a file
     Hash { file: PathBuf },
 }
@@ -228,6 +311,90 @@ fn run() -> Result<(), String> {
             let r = zipkoo_core::sfx::build(&stub, &inputs, &out, &opts, &mut bar(), None).map_err(|e| e.to_string())?;
             eprintln!();
             println!("✓ {} files · {} → {} ({})", r.files, human(r.input_bytes), out.display(), human(r.output_bytes));
+        }
+        Cmd::Share { file, server, hours, downloads, lock } => {
+            let pw = if lock { Some(ask_password(true)?) } else { None };
+            let opts = zipkoo_core::share::ShareOptions { server: &server, expires_hours: hours, max_downloads: downloads, password: pw.as_deref() };
+            let s = zipkoo_core::share::upload(&file, &opts, &mut |_| {}).map_err(|e| e.to_string())?;
+            println!("{}", s.url);
+            eprintln!("Delete token (keep it to remove the link early): {}", s.delete_token);
+        }
+        Cmd::Get { link, to, password } => {
+            let p = zipkoo_core::share::download(&link, &to, password.as_deref(), &mut |_| {}).map_err(|e| e.to_string())?;
+            println!("✓ {}", p.display());
+        }
+        Cmd::Update { archive, inputs, remove_missing, no_history, password } => {
+            let opts = zipkoo_core::update::UpdateOptions { password: password.as_deref(), keep_history: !no_history, remove_missing, smart: true };
+            let r = zipkoo_core::update::update(&archive, &inputs, &opts, &mut bar(), None).map_err(|e| e.to_string())?;
+            eprintln!();
+            println!("✓ version {} · {} added · {} changed · {} removed · {} unchanged · packed {}", r.version, r.added, r.changed, r.removed, r.unchanged, human(r.bytes_packed));
+        }
+        Cmd::History { archive } => {
+            let m = zipkoo_core::update::read_manifest(&archive).map_err(|e| e.to_string())?;
+            if m.versions.is_empty() {
+                println!("No history yet. Run `zipkoo update` to start one.");
+            }
+            for v in m.versions {
+                println!("v{}  {}  +{} ~{} -{}", v.version, v.time, v.added.len(), v.changed.len(), v.removed.len());
+            }
+        }
+        Cmd::Heal { archive, create, repair } => {
+            if let Some(p) = create {
+                let r = zipkoo_core::heal::create(&archive, p, &mut bar(), None).map_err(|e| e.to_string())?;
+                eprintln!();
+                println!("✓ repair data {} ({})", r.path.display(), human(r.size));
+            } else {
+                let h = zipkoo_core::heal::check(&archive, repair, &mut bar(), None).map_err(|e| e.to_string())?;
+                eprintln!();
+                if h.healthy() {
+                    println!("✓ Healthy · {} blocks checked", h.blocks);
+                } else if repair && h.repairable() {
+                    println!("✓ Repaired {} damaged blocks", h.repaired);
+                } else if h.repairable() {
+                    println!("⚠ {} damaged blocks. Run with --repair to fix them.", h.damaged);
+                } else {
+                    return Err(format!("{} damaged blocks; {} are beyond the repair data.", h.damaged, h.unrecoverable));
+                }
+            }
+        }
+        Cmd::Convert { archives, format, password } => {
+            let format = match format { Fmt::Zip => Format::Zip, Fmt::SevenZ => Format::SevenZ, Fmt::TarZst => Format::TarZst };
+            for a in archives {
+                let out = zipkoo_core::convert::converted_path(&a, format);
+                let opts = zipkoo_core::convert::ConvertOptions { password: password.as_deref(), pack: PackOptions { format, ..Default::default() } };
+                match zipkoo_core::convert::convert(&a, &out, &opts, &mut bar(), None) {
+                    Ok(r) => { eprintln!(); println!("✓ {} → {} ({})", a.display(), out.display(), human(r.output_bytes)); }
+                    Err(e) => { eprintln!(); println!("✗ {}: {e}", a.display()); }
+                }
+            }
+        }
+        Cmd::Backup { folder, dest, keep, repair } => {
+            let opts = zipkoo_core::backup::BackupOptions { keep, recovery_percent: repair, ..Default::default() };
+            match zipkoo_core::backup::snapshot(&folder, &dest, &opts, &mut bar(), None).map_err(|e| e.to_string())? {
+                Some(s) => { eprintln!(); println!("✓ {} ({} files){}", s.path.display(), s.report.files, if s.pruned.is_empty() { String::new() } else { format!(" · removed {} old", s.pruned.len()) }); }
+                None => println!("Nothing changed since the last snapshot."),
+            }
+        }
+        Cmd::Search { query, r#in } => {
+            let db = std::env::temp_dir().join("zipkoo-cli-index.db");
+            let mut ix = zipkoo_core::index::Index::open(&db).map_err(|e| e.to_string())?;
+            ix.refresh(&zipkoo_core::index::find_archives(&r#in, 12)).map_err(|e| e.to_string())?;
+            for h in ix.search(&query, 200).map_err(|e| e.to_string())? {
+                println!("{:>10}  {}  ⟵  {}", human(h.size), h.name, h.archive);
+            }
+        }
+        Cmd::Dupes { inputs } => {
+            let g = zipkoo_core::dupes::find(&inputs, 1).map_err(|e| e.to_string())?;
+            let wasted: u64 = g.iter().map(|g| g.wasted).sum();
+            for grp in &g {
+                println!("{} × {}", grp.files.len(), human(grp.size));
+                for f in &grp.files { println!("    {}", f.display()); }
+            }
+            println!("{} groups · {} could be saved", g.len(), human(wasted));
+        }
+        Cmd::Shrink { inputs, out, max_edge, quality } => {
+            let r = zipkoo_core::optimize::optimize(&inputs, &out, &zipkoo_core::optimize::OptimizeOptions { max_edge, quality }).map_err(|e| e.to_string())?;
+            println!("✓ {} photos ({} smaller) · {} → {} · {}", r.images, r.shrunk, human(r.before), human(r.after), out.display());
         }
         Cmd::Hash { file } => {
             println!("{}  {}", zipkoo_core::hash::sha256_file(&file).map_err(|e| e.to_string())?, file.display());
