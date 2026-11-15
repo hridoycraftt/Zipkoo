@@ -97,9 +97,9 @@ export function SettingsView(p: {
         <Toggle id="set-skip" checked={s.skipPrograms} onChange={(skipPrograms) => update({ skipPrograms })} label={t("skipProgramsLabel")} />
         {p.scanner ? (
           <Toggle id="set-scan" checked={s.scanAfterExtract} onChange={(scanAfterExtract) => update({ scanAfterExtract })} label={t("scanLabel")} hint={t("scanHint", { engine: p.scanner })} />
-        ) : (
+        ) : info && info.flavor !== "appstore" ? (
           <div className="set-row"><span className="set-text"><b>{t("scanLabel")}</b><small>{t("scanNone")}</small></span></div>
-        )}
+        ) : null}
       </section>
 
       {p.shell.supported && (
