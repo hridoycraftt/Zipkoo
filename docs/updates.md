@@ -25,7 +25,7 @@ npx @tauri-apps/cli signer generate -w ~/.tauri/zipkoo.key
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
 4. Send Claude the contents of `~/.tauri/zipkoo.key.pub`. It is public and safe to share. It goes into `app/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`), and `bundle.createUpdaterArtifacts` gets turned on.
 
-Only builds made **after** step 4 can update themselves. Install that build once by hand; every later version then arrives through the popup.
+Only builds made **after** step 4 (done: the public key is in tauri.conf.json) can update themselves. Install that build once by hand; every later version then arrives through the popup.
 
 ## Releasing an update
 

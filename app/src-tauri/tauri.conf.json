@@ -106,12 +106,13 @@
       "nsis": {
         "installMode": "both"
       }
-    }
+    },
+    "createUpdaterArtifacts": true
   },
   "mainBinaryName": "Zipkoo",
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEzOEYxNzZCQzNDQTUwQjUKUldTMVVNckRheGVQRTFjaG1BdHkxTHRSdjBreEdPVGdHOWFEYWFBTWdQdXpDdkNpbEdkTmdZT0EK",
       "endpoints": [
         "https://github.com/hridoycraftt/Zipkoo/releases/latest/download/latest.json"
       ],
