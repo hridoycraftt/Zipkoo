@@ -304,6 +304,7 @@ pub fn run() {
             receive(app, argv.into_iter().skip(1).collect());
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Jobs::default())
         .manage(Inbox::default())
@@ -361,7 +362,10 @@ pub fn run() {
             features::watches_list,
             features::watch_save,
             features::watch_remove,
-            features::watch_run_now
+            features::watch_run_now,
+            features::edit_archive,
+            features::open_entry,
+            features::prepare_drag
         ])
         .build(tauri::generate_context!())
         .expect("error while building Zipkoo")

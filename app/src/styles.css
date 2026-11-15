@@ -414,3 +414,21 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
 .tool-buttons { display: flex; gap: 6px; flex: none; }
 .watch-buttons { display: inline-flex; gap: 4px; margin-left: auto; flex-wrap: nowrap; }
 .icon-btn { width: 42px; height: 42px; padding: 0; justify-content: center; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger:hover { background: #a02f27; }
+.sheet .field input { height: 44px; }
+
+/* Breadcrumbs inside an archive */
+.crumbs { display: flex; align-items: center; gap: 2px; padding: 0 28px 10px; flex-wrap: wrap; min-height: 34px; }
+.crumb { border: 0; background: none; padding: 4px 8px; border-radius: 8px; font-weight: 600; font-size: 13.5px; color: var(--ink-2); cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumb:hover { background: var(--pane-2); color: var(--ink); }
+.crumb.here { color: var(--ink); background: var(--pane-2); }
+.crumb-sep { color: var(--muted); padding: 0 2px; }
+.crumb-wrap { display: inline-flex; align-items: center; }
+.crumb-up { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--hair); background: var(--pane); display: grid; place-items: center; cursor: pointer; margin-right: 6px; color: var(--ink-2); }
+.crumb-up:disabled { opacity: 0.4; cursor: default; }
+.crumb-up .up { transform: rotate(180deg); }
+.ficon.big { width: 52px; height: 52px; border-radius: 16px; margin: 0 auto 10px; }
+.peek-msg .ficon { display: grid; }
+.drag-hint { margin-top: auto; }
+.row-item { touch-action: none; }

@@ -7,6 +7,7 @@ pub mod backup;
 pub mod cloud;
 pub mod convert;
 pub mod dupes;
+pub mod edit;
 pub mod error;
 pub mod extract;
 pub mod format;

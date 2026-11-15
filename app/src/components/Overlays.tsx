@@ -84,3 +84,59 @@ export function Toast({ toast, onDone }: { toast: ToastData; onDone: () => void 
     </div>
   );
 }
+
+/** A short yes/no question. `danger` styles the confirm button for destructive actions. */
+export function ConfirmDialog({ title, body, confirm, cancel, danger, onConfirm, onCancel, children }: {
+  title: string; body?: string; confirm: string; cancel: string; danger?: boolean;
+  onConfirm: () => void; onCancel: () => void; children?: React.ReactNode;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+  return (
+    <div className="scrim" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
+      <div className="sheet narrow">
+        <h2 id="confirm-title">{title}</h2>
+        {body && <p>{body}</p>}
+        {children}
+        <div className="row gap end">
+          <button className="btn quiet" onClick={onCancel}>{cancel}</button>
+          <button ref={ref} className={`btn ${danger ? "danger" : "primary"}`} onClick={onConfirm}>{confirm}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Ask for one line of text, e.g. a new name. */
+export function PromptDialog({ title, label, initial, submit, cancel, validate, onSubmit, onCancel }: {
+  title: string; label: string; initial: string; submit: string; cancel: string;
+  validate: (v: string) => string | null; onSubmit: (v: string) => void; onCancel: () => void;
+}) {
+  const [v, setV] = useState(initial);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    // Select the name without its extension, like Finder and Explorer do.
+    const dot = initial.lastIndexOf(".");
+    el.setSelectionRange(0, dot > 0 ? dot : initial.length);
+  }, [initial]);
+  const err = v.trim() === initial ? null : validate(v.trim());
+  return (
+    <div className="scrim" role="dialog" aria-modal="true" aria-labelledby="prompt-title" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
+      <form className="sheet narrow" onSubmit={(e) => { e.preventDefault(); if (!err && v.trim() && v.trim() !== initial) onSubmit(v.trim()); }}>
+        <h2 id="prompt-title">{title}</h2>
+        <label className="field">
+          <span>{label}</span>
+          <input id="prompt-input" ref={ref} value={v} onChange={(e) => setV(e.target.value)} spellCheck={false} autoComplete="off" />
+        </label>
+        {err && <p className="err small">{err}</p>}
+        <div className="row gap end">
+          <button type="button" className="btn quiet" onClick={onCancel}>{cancel}</button>
+          <button type="submit" className="btn primary" disabled={!!err || !v.trim() || v.trim() === initial}>{submit}</button>
+        </div>
+      </form>
+    </div>
+  );
+}

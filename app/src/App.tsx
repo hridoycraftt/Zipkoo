@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath as osOpen, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import {
+  EDITABLE, editArchive, openEntry, prepareDrag, type Change, type Entry,
   cloudFolders, convertArchives, shareFile, updateArchive, type CloudFolder,
   asUiError, cancelJob, extractArchive, inspectArchive, isArchive, onProgress, onShellActions, packFiles, sfxAvailable,
   shellSet, shellStatus, suggestExtractDest, suggestPackOutput, takeShellActions,
@@ -15,7 +17,7 @@ import { Icon } from "./components/Icon";
 import { Home } from "./components/Home";
 import { ArchiveView } from "./components/ArchiveView";
 import { PackSheet, type PackPreset } from "./components/PackSheet";
-import { PasswordDialog, ProgressOverlay, Toast, type ToastData } from "./components/Overlays";
+import { ConfirmDialog, PasswordDialog, ProgressOverlay, PromptDialog, Toast, type ToastData } from "./components/Overlays";
 import { FolderView, SearchView, SharesView, ShareSheet, ToolsView, WatchView, type ViewCtx } from "./components/Views";
 
 type View = { kind: "home" | "search" | "watch" | "shares" | "tools" } | { kind: "cloud"; folder: CloudFolder };
@@ -64,6 +66,11 @@ export default function App() {
   const [shareTarget, setShareTarget] = useState<string | null>(null);
   const [convertTarget, setConvertTarget] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  // Folder you're in, per archive, so it survives a refresh after an edit.
+  const [cwds, setCwds] = useState<Record<string, string>>({});
+  const [confirm, setConfirm] = useState<null | { title: string; body?: string; confirm: string; danger?: boolean; run: () => void; extra?: "replace"; alt?: { label: string; run: () => void } }>(null);
+  const [replaceOnAdd, setReplaceOnAdd] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -302,13 +309,80 @@ export default function App() {
     });
   }, [runShellAction]);
 
+  const archiveRef = useRef(archive);
+  archiveRef.current = archive;
+  const cwdsRef = useRef(cwds);
+  cwdsRef.current = cwds;
+
+  /** Apply a change to the open archive, then reload it in place. */
+  const applyEdit = useCallback(
+    async (change: Change) => {
+      const a = archiveRef.current;
+      if (!a) return;
+      const r = await runJob(t("editing"), (id) => editArchive(id, a.info.path, change, a.password));
+      if (!r) return;
+      setToast({ kind: "ok", text: t("edited", { added: num(r.added + r.replaced, lang), deleted: num(r.deleted, lang), renamed: num(r.renamed, lang) }), sub: r.skipped.length ? `${t("skippedNote", { n: num(r.skipped.length, lang) })}: ${r.skipped.slice(0, 3).map(baseName).join(", ")}` : undefined });
+      await openPath(a.info.path, a.password);
+      setRevision((n) => n + 1);
+    },
+    [runJob, t, lang, openPath],
+  );
+
   const handlePaths = useCallback(
     (paths: string[]) => {
       if (!paths.length) return;
+      const a = archiveRef.current;
+      // Dropped onto an open archive that can be changed: offer to add them to the current folder.
+      if (a && EDITABLE.includes(a.info.format) && !(paths.length === 1 && paths[0] === a.info.path)) {
+        const folder = cwdsRef.current[a.info.path] ?? "";
+        setReplaceOnAdd(false);
+        setConfirm({
+          title: t("addTitle", { n: num(paths.length, lang), where: folder ? folder.slice(0, -1).split("/").pop()! : baseName(a.info.path) }),
+          confirm: t("addHere"),
+          extra: "replace",
+          run: () => applyEdit({ kind: "add", inputs: paths, folder, replace: replaceRef.current }),
+          alt: { label: t("newArchiveInstead"), run: () => setPack({ inputs: paths }) },
+        });
+        return;
+      }
       if (paths.length === 1 && isArchive(paths[0])) openPath(paths[0]);
       else setPack({ inputs: paths });
     },
-    [openPath],
+    [openPath, applyEdit, t, lang],
+  );
+  const replaceRef = useRef(replaceOnAdd);
+  replaceRef.current = replaceOnAdd;
+
+  const openFromArchive = useCallback(
+    async (e: Entry, force = false) => {
+      const a = archiveRef.current;
+      if (!a) return;
+      if (e.executable && !force) {
+        setConfirm({ title: t("programOpenTitle"), body: t("programOpenBody", { name: baseName(e.name) }), confirm: t("openAnyway"), danger: true, run: () => openFromArchive(e, true) });
+        return;
+      }
+      try {
+        const p = await openEntry(a.info.path, e.name, a.password);
+        await osOpen(p);
+      } catch (err) {
+        failToast(err);
+      }
+    },
+    [t, failToast],
+  );
+
+  const dragOut = useCallback(
+    async (names: string[]) => {
+      const a = archiveRef.current;
+      if (!a || !names.length) return;
+      try {
+        const d = await prepareDrag(a.info.path, names, a.password);
+        await startDrag({ item: d.items, icon: d.icon });
+      } catch (err) {
+        failToast(err);
+      }
+    },
+    [failToast],
   );
 
   useEffect(() => {
@@ -483,6 +557,21 @@ export default function App() {
             onUpdate={updateCurrent}
             onConvert={() => setConvertTarget(archive.info.path)}
             revision={revision}
+            cwd={cwds[archive.info.path] ?? ""}
+            setCwd={(c) => setCwds((m) => ({ ...m, [archive.info.path]: c }))}
+            editable={EDITABLE.includes(archive.info.format)}
+            onOpenEntry={(e) => openFromArchive(e)}
+            onDragOut={dragOut}
+            onDelete={(names) =>
+              setConfirm({
+                title: t("deleteTitle", { n: num(names.length, lang), name: baseName(archive.info.path) }),
+                body: t("deleteBody"),
+                confirm: t("deleteBtn"),
+                danger: true,
+                run: () => applyEdit({ kind: "delete", names }),
+              })
+            }
+            onRename={(name) => setRenaming(name)}
           />
         ) : view.kind === "search" ? (
           <SearchView ctx={ctx} extra={recent} />
@@ -506,6 +595,44 @@ export default function App() {
         </div>
       )}
       {pack && <PackSheet t={t} lang={lang} inputs={pack.inputs} preset={pack.preset} sfxEnabled={sfxOk} clouds={clouds} onCancel={() => setPack(null)} onStart={startPack} />}
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.title}
+          body={confirm.body}
+          confirm={confirm.confirm}
+          cancel={t("cancel")}
+          danger={confirm.danger}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => { const c = confirm; setConfirm(null); c.run(); }}
+        >
+          {confirm.extra === "replace" && (
+            <label className="check small">
+              <input id="add-replace" type="checkbox" checked={replaceOnAdd} onChange={(e) => setReplaceOnAdd(e.target.checked)} />
+              {t("addReplace")}
+            </label>
+          )}
+          {confirm.alt && <button className="link" onClick={() => { const c = confirm; setConfirm(null); c.alt!.run(); }}>{confirm.alt.label}</button>}
+        </ConfirmDialog>
+      )}
+      {renaming && archive && (
+        <PromptDialog
+          title={t("renameTitle", { name: renaming.replace(/\/$/, "").split("/").pop()! })}
+          label={t("newName")}
+          initial={renaming.replace(/\/$/, "").split("/").pop()!}
+          submit={t("renameBtn")}
+          cancel={t("cancel")}
+          validate={(v) => (/[\\/:*?"<>|]/.test(v) || v === "." || v === ".." ? t("nameInvalid") : null)}
+          onCancel={() => setRenaming(null)}
+          onSubmit={(v) => {
+            const from = renaming;
+            setRenaming(null);
+            const isDir = from.endsWith("/");
+            const base = from.replace(/\/$/, "");
+            const parent = base.includes("/") ? base.slice(0, base.lastIndexOf("/") + 1) : "";
+            applyEdit({ kind: "rename", from, to: parent + v + (isDir ? "/" : "") });
+          }}
+        />
+      )}
       {shareTarget && <ShareSheet t={t} name={baseName(shareTarget)} onCancel={() => setShareTarget(null)} onCreate={createShare} />}
       {convertTarget && (
         <div className="scrim" role="dialog" aria-modal="true" aria-labelledby="conv-title">

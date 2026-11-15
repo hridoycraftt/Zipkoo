@@ -474,3 +474,91 @@ pub fn start_scheduler(app: AppHandle) {
         }
     });
 }
+
+// ---------- Editing, opening and dragging files inside an archive ----------
+
+#[tauri::command]
+pub async fn edit_archive(app: AppHandle, jobs: State<'_, Jobs>, job_id: String, archive: PathBuf, change: zipkoo_core::edit::Change, password: Option<String>) -> Result<zipkoo_core::edit::EditReport, UiError> {
+    job(app, &jobs, job_id, move |emit, cancel| zipkoo_core::edit::edit(&archive, &change, password.as_deref(), emit, Some(cancel))).await
+}
+
+/// A fresh, private temporary folder for files taken out of an archive to open or drag.
+fn scratch(app: &AppHandle, kind: &str) -> Result<PathBuf, UiError> {
+    let base = app.path().app_cache_dir().unwrap_or_else(|_| std::env::temp_dir().join("zipkoo")).join(kind);
+    // Clean up what earlier sessions left behind (older than a day).
+    if let Ok(rd) = std::fs::read_dir(&base) {
+        for e in rd.flatten() {
+            let old = e.metadata().and_then(|m| m.modified()).map(|t| t.elapsed().map(|d| d.as_secs() > 86_400).unwrap_or(false)).unwrap_or(false);
+            if old {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    let dir = base.join(format!("{}-{}", now(), rand_tag()));
+    std::fs::create_dir_all(&dir).map_err(ui)?;
+    Ok(dir)
+}
+
+fn rand_tag() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    format!("{:x}", h.finish())
+}
+
+/// Take one file out to a private temp folder and return its path (the UI opens it with the
+/// default app). Programs are never started automatically: the UI asks first.
+#[tauri::command]
+pub async fn open_entry(app: AppHandle, archive: PathBuf, name: String, password: Option<String>) -> Result<PathBuf, UiError> {
+    let dir = scratch(&app, "open")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let opts = zipkoo_core::ExtractOptions { password: password.as_deref(), only: vec![name.clone()], strip: name.rsplit_once('/').map(|(p, _)| format!("{p}/")), ..Default::default() };
+        let r = zipkoo_core::extract(&archive, &dir, &opts, &mut |_| {}, None)?;
+        let leaf = name.rsplit('/').next().unwrap_or(&name).to_string();
+        let out = dir.join(zipkoo_core::safety::windows_safe(&leaf));
+        let out = if out.exists() { out } else { dir.join(&leaf) };
+        if r.files == 0 || !out.exists() {
+            return Err(zipkoo_core::Error::EntryNotFound(name));
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(ui)?
+    .map_err(Into::into)
+}
+
+#[derive(Serialize)]
+pub struct DragPayload {
+    items: Vec<PathBuf>,
+    icon: PathBuf,
+}
+
+/// Extract the dragged entries (files or whole folders) to a temp folder so the OS can copy them
+/// wherever they are dropped.
+#[tauri::command]
+pub async fn prepare_drag(app: AppHandle, archive: PathBuf, names: Vec<String>, password: Option<String>) -> Result<DragPayload, UiError> {
+    let dir = scratch(&app, "drag")?;
+    let icon = dir.join(".zipkoo-drag.png");
+    std::fs::write(&icon, include_bytes!("../icons/32x32.png")).map_err(ui)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        // Items keep their names; their parent folder inside the archive is dropped.
+        let mut items = Vec::new();
+        for n in &names {
+            let parent = n.trim_end_matches('/').rsplit_once('/').map(|(p, _)| format!("{p}/"));
+            let opts = zipkoo_core::ExtractOptions { password: password.as_deref(), only: vec![n.clone()], strip: parent, on_conflict: zipkoo_core::Conflict::Rename, ..Default::default() };
+            zipkoo_core::extract(&archive, &dir, &opts, &mut |_| {}, None)?;
+            let leaf = n.trim_end_matches('/').rsplit('/').next().unwrap_or(n);
+            let p = dir.join(leaf);
+            if p.exists() {
+                items.push(p);
+            }
+        }
+        if items.is_empty() {
+            return Err(zipkoo_core::Error::EntryNotFound(names.join(", ")));
+        }
+        Ok(DragPayload { items, icon })
+    })
+    .await
+    .map_err(ui)?
+    .map_err(Into::into)
+}

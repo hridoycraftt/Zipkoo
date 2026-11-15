@@ -160,3 +160,15 @@ export const watchSave = (watch: Watch) => invoke<Watch[]>("watch_save", { watch
 export const watchRemove = (id: string) => invoke<Watch[]>("watch_remove", { id });
 export const watchRunNow = (id: string) => invoke<Watch[]>("watch_run_now", { id });
 export const onEvent = (name: string, cb: () => void) => listen(name, cb);
+
+export type Change =
+  | { kind: "add"; inputs: string[]; folder: string; replace: boolean }
+  | { kind: "delete"; names: string[] }
+  | { kind: "rename"; from: string; to: string };
+export interface EditReport { added: number; replaced: number; deleted: number; renamed: number; skipped: string[] }
+export const editArchive = (jobId: string, archive: string, change: Change, password?: string) =>
+  invoke<EditReport>("edit_archive", { jobId, archive, change, password: password ?? null });
+export const openEntry = (archive: string, name: string, password?: string) => invoke<string>("open_entry", { archive, name, password: password ?? null });
+export const prepareDrag = (archive: string, names: string[], password?: string) =>
+  invoke<{ items: string[]; icon: string }>("prepare_drag", { archive, names, password: password ?? null });
+export const EDITABLE: Format[] = ["zip", "seven-z", "tar-zst"];
