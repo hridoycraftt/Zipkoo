@@ -27,12 +27,14 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: "-"
         run: npx tauri build --target universal-apple-darwin --bundles dmg
-      - name: Check the app inside
+      - name: Check the app inside the DMG
         run: |
-          APP=target/universal-apple-darwin/release/bundle/macos/Zipkoo.app
-          lipo -archs "$APP/Contents/MacOS/Zipkoo"
-          codesign --verify --deep --verbose=2 "$APP"
-          ls -la target/universal-apple-darwin/release/bundle/dmg/
+          DMG=$(ls target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          hdiutil attach "$DMG" -mountpoint /tmp/zk -nobrowse -readonly
+          lipo -archs /tmp/zk/Zipkoo.app/Contents/MacOS/Zipkoo
+          codesign --verify --deep --verbose=2 /tmp/zk/Zipkoo.app
+          ls /tmp/zk
+          hdiutil detach /tmp/zk
       - uses: actions/upload-artifact@v4
         with:
           name: Zipkoo-mac-universal
