@@ -19,10 +19,9 @@ Zipkoo only installs updates that are signed with your key, so nobody else can p
 npx @tauri-apps/cli signer generate -w ~/.tauri/zipkoo.key -p "" --ci
 ```
 
-2. **Back up `~/.tauri/zipkoo.key` and its password** (a password manager is fine). If you lose it, the copies people already installed can never update again.
+2. **Back up `~/.tauri/zipkoo.key`** (a password manager is fine). If you lose it, the copies people already installed can never update again.
 3. On GitHub, go to repo → Settings → Secrets and variables → Actions → New repository secret, and add:
-   - `TAURI_SIGNING_PRIVATE_KEY`: the full contents of `~/.tauri/zipkoo.key`
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
+   - `TAURI_SIGNING_PRIVATE_KEY`: the full contents of `~/.tauri/zipkoo.key` (the only secret needed)
 4. Send Claude the contents of `~/.tauri/zipkoo.key.pub`. It is public and safe to share. It goes into `app/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`), and `bundle.createUpdaterArtifacts` gets turned on.
 
 Only builds made **after** step 4 (done: the public key is in tauri.conf.json) can update themselves. Install that build once by hand; every later version then arrives through the popup.
