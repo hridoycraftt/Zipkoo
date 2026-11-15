@@ -93,6 +93,10 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* The window never scrolls as a whole (that left an empty band at the bottom on macOS when a
+   focused or scrolled element pulled the page up). Only the panes inside scroll. */
+html, body { overflow: hidden; overscroll-behavior: none; }
+#root { position: fixed; inset: 0; }
 body {
   font: 400 14.5px/1.6 var(--f-ui);
   font-feature-settings: "cv11", "ss01";
@@ -177,7 +181,7 @@ h1, h2 { text-wrap: balance; letter-spacing: -0.022em; }
 .content { min-width: 0; min-height: 0; overflow: hidden; padding: 14px; }
 
 /* ---------- Home ---------- */
-.home { height: 100%; overflow: auto; display: flex; flex-direction: column; gap: 28px; padding: 18px 18px 24px; }
+.home { height: 100%; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 28px; padding: 18px 18px 24px; }
 .dock {
   flex: none; position: relative; overflow: hidden;
   background: var(--pane); border-radius: var(--r-lg); box-shadow: var(--shadow-pane);
@@ -382,7 +386,14 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
 .side-switch { font-size: 13px; color: var(--ink-2); padding: 4px 8px 6px; }
 
 /* ---------- Pages (Search, Watch folders, Shared links, Tools, Cloud) ---------- */
-.page { height: 100%; overflow: auto; background: var(--pane); border-radius: var(--r-lg); box-shadow: var(--shadow-pane); padding: 30px 32px 36px; display: flex; flex-direction: column; gap: 18px; }
+.page { --page-max: 1120px; height: 100%; overflow: auto; overscroll-behavior: contain; background: var(--pane); border-radius: var(--r-lg); box-shadow: var(--shadow-pane); padding: 30px 32px 36px; display: flex; flex-direction: column; gap: 18px; }
+/* Wide windows (27" iMac, big monitors): keep a readable column, centered in the pane. */
+.page > * { width: 100%; max-width: var(--page-max); margin-inline: auto; }
+.page.settings { --page-max: 760px; }
+.home > * { width: 100%; max-width: 1120px; margin-inline: auto; }
+@media (min-width: 1600px) {
+  .archive { grid-template-columns: minmax(0, 1fr) 380px; }
+}
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
 .page-head > div { display: flex; flex-direction: column; gap: 6px; max-width: 62ch; }
 .page-head h1 { font-size: 24px; line-height: 1.25; font-weight: 700; }
@@ -495,7 +506,7 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
 
 /* Settings */
 .settings { gap: 8px; }
-.set-sec { display: flex; flex-direction: column; padding: 18px 0 8px; border-top: 1px solid var(--hair); max-width: 760px; }
+.set-sec { display: flex; flex-direction: column; padding: 18px 0 8px; border-top: 1px solid var(--hair); }
 .set-sec:first-of-type { border-top: 0; }
 .set-sec h2 { font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: 0; margin-bottom: 4px; }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; flex-wrap: wrap; }

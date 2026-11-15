@@ -596,7 +596,7 @@ export default function App() {
   };
 
   const checkUpdates = useCallback(
-    async (silent = false): Promise<string> => {
+    async (): Promise<string> => {
       try {
         const u = await checkUpdate();
         if (!u) return t("upToDate");
@@ -616,9 +616,12 @@ export default function App() {
         });
         return t("updateAvailable", { v: u.version });
       } catch (e) {
-        const msg = t("updateFailed", { msg: asUiError(e).message });
-        if (!silent) return msg;
-        return msg;
+        const raw = asUiError(e).message;
+        // No published release yet (latest.json is 404 or missing): that simply means up to date.
+        if (/release JSON|404|Not Found/i.test(raw)) return t("upToDate");
+        // Anything network-shaped: say so in plain words instead of the library's message.
+        if (/network|connect|dns|timed? ?out|offline|request|tls|certificate/i.test(raw)) return t("updateOffline");
+        return t("updateFailed", { msg: raw });
       }
     },
     [t, runJob],
@@ -627,7 +630,7 @@ export default function App() {
     // Quietly look for an update once at start (direct downloads with signing set up only).
     appInfo()
       .then((i) => {
-        if (i.flavor === "direct" && i.updater_ready && settingsRef.current.autoUpdate) checkUpdates(true);
+        if (i.flavor === "direct" && i.updater_ready && settingsRef.current.autoUpdate) checkUpdates();
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -782,7 +785,7 @@ export default function App() {
         ) : view.kind === "shares" ? (
           <SharesView ctx={ctx} server={shareServer} setServer={setShareServer} askPassword={(name, retry, wrong) => setPwPrompt({ path: name, error: wrong ? t("wrongPw") : undefined, then: (pw) => { setPwPrompt(null); retry(pw); } })} />
         ) : view.kind === "settings" ? (
-          <SettingsView scanner={scanner} t={t} lang={lang} setLang={setLang} settings={settings} update={updateSettings} shell={shell} toggleShell={toggleShell} shareServer={shareServer} setShareServer={setShareServer} checkUpdates={() => checkUpdates(false)} />
+          <SettingsView scanner={scanner} t={t} lang={lang} setLang={setLang} settings={settings} update={updateSettings} shell={shell} toggleShell={toggleShell} shareServer={shareServer} setShareServer={setShareServer} checkUpdates={() => checkUpdates()} />
         ) : view.kind === "tools" ? (
           <ToolsView ctx={ctx} />
         ) : view.kind === "cloud" ? (

@@ -31,7 +31,8 @@
 
 /* Title bar: the window has no title strip; this band is where it's dragged from. */
 [data-platform="mac"] .titlebar { position: fixed; inset: 0 0 auto 0; height: 34px; z-index: 5; }
-[data-platform="mac"] .side { padding-top: 46px; }
+[data-platform="mac"] .side { padding-top: 0; }
+[data-platform="mac"] .side::before { content: ""; position: sticky; top: 0; z-index: 2; flex: none; height: 46px; margin: 0 -12px; background: var(--side); }
 [data-platform="mac"] .content { padding-top: 34px; }
 
 /* Source-list sidebar: small rows, accent-tinted icons, a soft rounded selection. */
