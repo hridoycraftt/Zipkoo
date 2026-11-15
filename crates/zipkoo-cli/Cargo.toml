@@ -1,0 +1,13 @@
+[package]
+name = "zipkoo-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "zipkoo"
+path = "src/main.rs"
+
+[dependencies]
+zipkoo-core = { path = "../zipkoo-core" }
+clap = { version = "4", features = ["derive"] }
