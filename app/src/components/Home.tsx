@@ -35,7 +35,7 @@ export function Home({ t, recent, onPackFiles, onPackFolder, onOpen, onOpenPath 
             {recent.map((p) => (
               <li key={p}>
                 <button className="recent-item" onClick={() => onOpenPath(p)} title={p}>
-                  <span className="ficon t-arch"><Icon name="pack" size={18} /></span>
+                  <span className="ficon t-arch"><Icon name="zip" size={18} /></span>
                   <span className="names">
                     <span className="leaf">{baseName(p)}</span>
                     <span className="path">{dirName(p)}</span>
