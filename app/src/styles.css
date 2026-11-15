@@ -514,3 +514,5 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
 .pw-add { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; padding: 10px 0 4px; }
 .pw-add input { height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--hair-strong); background: var(--pane); min-width: 0; user-select: text; }
 .pw-add input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 4px rgb(23 120 106 / 0.12); }
+
+.pre-line { white-space: pre-line; }

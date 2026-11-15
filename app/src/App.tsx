@@ -90,7 +90,7 @@ export default function App() {
   const [revision, setRevision] = useState(0);
   // Folder you're in, per archive, so it survives a refresh after an edit.
   const [cwds, setCwds] = useState<Record<string, string>>({});
-  const [confirm, setConfirm] = useState<null | { title: string; body?: string; confirm: string; danger?: boolean; run: () => void; cancel?: () => void; extra?: "replace"; alt?: { label: string; run: () => void } }>(null);
+  const [confirm, setConfirm] = useState<null | { title: string; body?: string; confirm: string; danger?: boolean; run: () => void; cancel?: () => void; cancelLabel?: string; extra?: "replace"; alt?: { label: string; run: () => void } }>(null);
   const [replaceOnAdd, setReplaceOnAdd] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [conflictAsk, setConflictAsk] = useState<null | { names: string[]; folder: string; resolve: (c: "skip" | "rename" | "overwrite" | null) => void }>(null);
@@ -600,17 +600,18 @@ export default function App() {
       try {
         const u = await checkUpdate();
         if (!u) return t("upToDate");
-        setToast({
-          kind: "info",
-          text: t("updateAvailable", { v: u.version }),
-          action: {
-            label: t("installRestart"),
-            run: () => {
-              runJob(t("working"), async () => {
-                await u.downloadAndInstall();
-                await relaunch();
-              });
-            },
+        // Ask every time: "Update now" installs and restarts; "Later" asks again next launch.
+        const notes = (u.body ?? "").trim();
+        setConfirm({
+          title: t("updateTitle", { v: u.version }),
+          body: (notes ? notes.slice(0, 400) + (notes.length > 400 ? "…" : "") + "\n\n" : "") + t("updateBody", { current: u.currentVersion }),
+          confirm: t("updateNow"),
+          cancelLabel: t("updateLater"),
+          run: () => {
+            runJob(t("updateDownloading", { v: u.version }), async () => {
+              await u.downloadAndInstall();
+              await relaunch();
+            });
           },
         });
         return t("updateAvailable", { v: u.version });
@@ -803,7 +804,7 @@ export default function App() {
           title={confirm.title}
           body={confirm.body}
           confirm={confirm.confirm}
-          cancel={t("cancel")}
+          cancel={confirm.cancelLabel ?? t("cancel")}
           danger={confirm.danger}
           onCancel={() => { const c = confirm; setConfirm(null); c.cancel?.(); }}
           onConfirm={() => { const c = confirm; setConfirm(null); c.run(); }}

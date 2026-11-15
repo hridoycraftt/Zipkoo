@@ -103,7 +103,7 @@ export function ConfirmDialog({ title, body, confirm, cancel, danger, onConfirm,
     <div className="scrim" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
       <div className="sheet narrow">
         <h2 id="confirm-title">{title}</h2>
-        {body && <p>{body}</p>}
+        {body && <p className="pre-line">{body}</p>}
         {children}
         <div className="row gap end">
           <button className="btn quiet" onClick={onCancel}>{cancel}</button>
