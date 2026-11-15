@@ -1,0 +1,40 @@
+name: Mac DMG (test build)
+
+# Run by hand (Actions → Mac DMG → Run workflow). Builds one universal DMG (Apple silicon + Intel)
+# and keeps it as a workflow artifact for 14 days. Nothing is published or released.
+# Without an Apple Developer ID it is only ad-hoc signed: the first open needs right-click → Open.
+on:
+  workflow_dispatch:
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+      - name: Build universal DMG
+        working-directory: app
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npx tauri build --target universal-apple-darwin --bundles dmg
+      - name: Check the app inside
+        run: |
+          APP=target/universal-apple-darwin/release/bundle/macos/Zipkoo.app
+          lipo -archs "$APP/Contents/MacOS/Zipkoo"
+          codesign --verify --deep --verbose=2 "$APP"
+          ls -la target/universal-apple-darwin/release/bundle/dmg/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zipkoo-mac-universal
+          path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 14
