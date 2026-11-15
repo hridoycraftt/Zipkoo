@@ -32,6 +32,7 @@ jobs:
           DMG=$(ls target/universal-apple-darwin/release/bundle/dmg/*.dmg)
           hdiutil attach "$DMG" -mountpoint /tmp/zk -nobrowse -readonly
           lipo -archs /tmp/zk/Zipkoo.app/Contents/MacOS/Zipkoo
+          plutil -extract CFBundleDocumentTypes json -o - /tmp/zk/Zipkoo.app/Contents/Info.plist
           codesign --verify --deep --verbose=2 /tmp/zk/Zipkoo.app
           ls /tmp/zk
           hdiutil detach /tmp/zk

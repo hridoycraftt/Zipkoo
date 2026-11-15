@@ -11,7 +11,78 @@
         "dragDropEnabled": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 18, "y": 20 }
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 20
+        }
+      }
+    ]
+  },
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": [
+          "zip",
+          "zipx"
+        ],
+        "name": "ZIP archive",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "7z"
+        ],
+        "name": "7z archive",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "rar"
+        ],
+        "name": "RAR archive",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "tar",
+          "gz",
+          "tgz",
+          "zst",
+          "tzst",
+          "bz2",
+          "tbz2",
+          "xz",
+          "txz"
+        ],
+        "name": "Compressed archive",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "iso",
+          "cab",
+          "lzh",
+          "lha"
+        ],
+        "name": "Disc image or archive",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "001"
+        ],
+        "name": "Split archive part",
+        "role": "Viewer"
+      },
+      {
+        "ext": [],
+        "contentTypes": [
+          "public.data"
+        ],
+        "name": "Any file",
+        "description": "Zip any file with Zipkoo",
+        "role": "Viewer",
+        "rank": "Alternate"
       }
     ]
   }
