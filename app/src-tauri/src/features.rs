@@ -892,10 +892,21 @@ pub fn app_info(app: AppHandle) -> AppInfo {
 /// Move a file to the Recycle Bin / Trash (used for "delete the archive after extracting").
 #[tauri::command]
 pub async fn trash_path(path: PathBuf) -> Result<(), UiError> {
-    tauri::async_runtime::spawn_blocking(move || trash::delete(&path))
-        .await
-        .map_err(ui)?
-        .map_err(ui)
+    tauri::async_runtime::spawn_blocking(move || {
+        #[allow(unused_mut)]
+        let mut ctx = trash::TrashContext::default();
+        // Finder scripting needs an Apple Events permission (and isn't allowed in the App Store);
+        // the file-manager call needs none.
+        #[cfg(target_os = "macos")]
+        {
+            use trash::macos::{DeleteMethod, TrashContextExtMacos};
+            ctx.set_delete_method(DeleteMethod::NsFileManager);
+        }
+        ctx.delete(&path)
+    })
+    .await
+    .map_err(ui)?
+    .map_err(ui)
 }
 
 // ---------- Saved passwords (OS keychain) ----------

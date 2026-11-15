@@ -1,4 +1,5 @@
 //! Tauri commands that expose zipkoo-core to the UI.
+pub mod access;
 pub mod features;
 pub mod shell;
 
@@ -34,6 +35,7 @@ impl From<zipkoo_core::Error> for UiError {
             E::Cancelled => "cancelled",
             E::UnsupportedFormat(_) => "unsupported",
             E::Damaged(_) => "damaged",
+            E::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied => "no_access",
             _ => "error",
         };
         UiError {
@@ -317,7 +319,10 @@ fn sfx_stub(app: &AppHandle) -> Option<PathBuf> {
 #[tauri::command]
 fn sfx_available(app: AppHandle) -> bool {
     // Self-extracting programs are a Windows convention; macOS blocks unsigned downloaded apps.
-    (cfg!(windows) || std::env::var_os("ZIPKOO_SFX_STUB").is_some()) && sfx_stub(&app).is_some()
+    // The App Store build ships no Windows program inside it.
+    !cfg!(feature = "appstore")
+        && (cfg!(windows) || std::env::var_os("ZIPKOO_SFX_STUB").is_some())
+        && sfx_stub(&app).is_some()
 }
 
 /// A free output path next to the first input: "Photos.zip", or "Photos (2).zip" if taken.
@@ -434,6 +439,7 @@ pub fn run() {
         .manage(features::SearchIndex::default())
         .manage(features::Watches::default())
         .setup(|app| {
+            access::restore(app.handle());
             #[cfg(debug_assertions)]
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("Zipkoo (dev)");
@@ -496,6 +502,8 @@ pub fn run() {
             features::extract_conflicts,
             features::test_archive,
             features::salvage_zip,
+            access::folder_access,
+            access::folder_grant,
             features::app_info,
             features::trash_path,
             features::passwords_list,

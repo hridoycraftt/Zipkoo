@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-  ARCHIVE_EXTS, virusScan, scanAvailable, asUiError, convertArchives, findDuplicates, healCheck, testArchive, salvageZip, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
+  ARCHIVE_EXTS, virusScan, scanAvailable, asUiError, convertArchives, findDuplicates, healCheck, testArchive, salvageZip, folderGrant, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
   shareDelete, shareDownload, sharesList, watchRemove, watchRunNow, watchSave, watchesList,
   type CloudFolder, type DupGroup, type FolderItem, type Health, type Hit, type IndexStats, type ShareRecord, type Watch,
 } from "../api";
@@ -21,6 +21,8 @@ export interface ViewCtx {
   runJob: RunJob;
   openPath: (p: string) => void;
   fail: (e: unknown) => void;
+  /** Ask for access to a folder first if Zipkoo can't use it (Mac App Store sandbox, read-only folders). */
+  ensureFolder: (dir: string, write?: boolean) => Promise<boolean>;
 }
 
 const when = (secs: number, lang: Lang) => new Date(secs * 1000).toLocaleString(lang === "bn" ? "bn-BD" : undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -87,6 +89,7 @@ export function SearchView({ ctx, extra }: { ctx: ViewCtx; extra: string[] }) {
   const addFolder = async () => {
     const d = await openDialog({ directory: true });
     if (!d || Array.isArray(d)) return;
+    await folderGrant(d).catch(() => {});
     const next = [...folders, d];
     setFolders(next);
     refresh(next);
@@ -156,6 +159,9 @@ export function WatchView({ ctx }: { ctx: ViewCtx }) {
     if (!folder || Array.isArray(folder)) return;
     const dest = await openDialog({ directory: true, title: t("pickDest"), defaultPath: dirName(folder) });
     if (!dest || Array.isArray(dest)) return;
+    // Backups run on a timer, also after a restart: keep access to both folders.
+    await folderGrant(folder).catch(() => {});
+    await folderGrant(dest).catch(() => {});
     save({ id: "", folder, dest, intervalMinutes: 60, keep: 10, repair: false, paused: false, lastRun: null, lastResult: null, lastOk: true });
   };
 
@@ -229,6 +235,7 @@ export function SharesView({ ctx, server, setServer, askPassword }: { ctx: ViewC
   const download = async () => {
     const dest = await openDialog({ directory: true });
     if (!dest || Array.isArray(dest)) return;
+    await folderGrant(dest).catch(() => {});
     const target = link.trim();
     // The password is checked before any bytes download, so retries don't use up the link.
     const run = async (pw?: string): Promise<void> => {
@@ -374,6 +381,7 @@ export function HealthPanel({ ctx, archive, password, standalone }: { ctx: ViewC
     );
   };
   const add = async () => {
+    if (!(await ctx.ensureFolder(dirName(archive)))) return;
     const r = await ctx.runJob(t("working"), (id) => healCreate(id, archive, 10));
     if (r) {
       setMsg(t("repairAdded", { size: human(r.size, lang) }));
@@ -389,6 +397,7 @@ export function HealthPanel({ ctx, archive, password, standalone }: { ctx: ViewC
   };
   const isZip = /\.(zip|zipx)$/i.test(archive);
   const salvage = async () => {
+    if (!(await ctx.ensureFolder(dirName(archive)))) return;
     const r = await ctx.runJob(t("salvaging"), (id) => salvageZip(id, archive));
     if (!r) return;
     setHealth(null);
@@ -425,6 +434,7 @@ export function ToolsView({ ctx }: { ctx: ViewCtx }) {
     const res = await openDialog({ multiple: true, filters: [{ name: "Archives", extensions: ARCHIVE_EXTS }] });
     if (!res) return;
     const files = Array.isArray(res) ? res : [res];
+    for (const d of new Set(files.map(dirName))) if (!(await ctx.ensureFolder(d))) return;
     const r = await ctx.runJob(t("converting"), (id) => convertArchives(id, files, to));
     if (r) {
       setResults(r);

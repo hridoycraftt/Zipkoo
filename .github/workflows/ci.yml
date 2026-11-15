@@ -42,6 +42,9 @@ jobs:
       # The Windows bundle ships the self-extracting stub as a resource.
       - run: cargo build --release -p zipkoo-sfx
       - run: cargo build -p zipkoo-app
+      # The Mac App Store flavour: sandboxed, no self-updater, no shell writer, no SFX.
+      - if: runner.os == 'macOS'
+        run: cargo build -p zipkoo-app --no-default-features --features appstore
 
   share-server:
     name: Share server tests

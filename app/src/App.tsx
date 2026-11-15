@@ -10,7 +10,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { applyTheme, loadSettings, saveSettings, type Settings } from "./settings";
 import { SettingsView } from "./components/SettingsView";
 import {
-  passwordAdd, passwordFind, salvageZip, scanAvailable, virusScan,
+  folderAccess, folderGrant, passwordAdd, passwordFind, salvageZip, scanAvailable, virusScan,
   ARCHIVE_EXTS, EDITABLE, appInfo, editArchive, extractConflicts, trashPath, openEntry, prepareDrag, type Change, type Entry,
   cloudFolders, convertArchives, shareFile, updateArchive, type CloudFolder,
   asUiError, cancelJob, extractArchive, inspectArchive, isArchive, onProgress, onShellActions, packFiles, sfxAvailable,
@@ -89,7 +89,7 @@ export default function App() {
   const [revision, setRevision] = useState(0);
   // Folder you're in, per archive, so it survives a refresh after an edit.
   const [cwds, setCwds] = useState<Record<string, string>>({});
-  const [confirm, setConfirm] = useState<null | { title: string; body?: string; confirm: string; danger?: boolean; run: () => void; extra?: "replace"; alt?: { label: string; run: () => void } }>(null);
+  const [confirm, setConfirm] = useState<null | { title: string; body?: string; confirm: string; danger?: boolean; run: () => void; cancel?: () => void; extra?: "replace"; alt?: { label: string; run: () => void } }>(null);
   const [replaceOnAdd, setReplaceOnAdd] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [conflictAsk, setConflictAsk] = useState<null | { names: string[]; folder: string; resolve: (c: "skip" | "rename" | "overwrite" | null) => void }>(null);
@@ -122,6 +122,7 @@ export default function App() {
       : e.code === "unsupported" ? t("unsupported")
       : e.code === "damaged" ? `${t("damaged")} ${e.message}`
       : e.code === "no_server" ? t("needServer")
+      : e.code === "no_access" ? t("noAccess")
       : e.message,
     [t, lang],
   );
@@ -172,6 +173,7 @@ export default function App() {
 
 
   const openPathRef = useRef<(p: string) => void>(() => {});
+  const ensureFolderRef = useRef<(dir: string, write?: boolean) => Promise<boolean>>(async () => true);
   const openPath = useCallback(
     async (path: string, password?: string) => {
       try {
@@ -194,7 +196,9 @@ export default function App() {
         }
         if (e.code === "password_required" || (e.code === "wrong_password" && !password)) askPassword(path, (pw) => openPath(path, pw));
         else if (e.code === "wrong_password") askPassword(path, (pw) => openPath(path, pw), true);
-        else if (e.code !== "cancelled" && /\.(zip|zipx)$/i.test(path)) {
+        else if (e.code === "no_access" && !password) {
+          if (await ensureFolderRef.current(dirName(path), false)) return openPath(path);
+        } else if (e.code !== "cancelled" && /\.(zip|zipx)$/i.test(path)) {
           setToast({
             kind: "err",
             text: t("salvageOffer"),
@@ -202,6 +206,7 @@ export default function App() {
             action: {
               label: t("salvageBtn"),
               run: async () => {
+                if (!(await ensureFolderRef.current(dirName(path)))) return;
                 const r = await runJob(t("salvaging"), (id) => salvageZip(id, path));
                 if (!r) return;
                 setToast({
@@ -220,9 +225,40 @@ export default function App() {
   );
   openPathRef.current = (p) => void openPath(p);
 
+  /**
+   * Make sure Zipkoo may use `dir` before writing there (or reading, with write=false).
+   * On the Mac App Store build the sandbox only allows folders the person chose, so this
+   * asks them to choose it once; the choice is remembered. Elsewhere it catches read-only folders.
+   */
+  const ensureFolder = useCallback(
+    async (target: string, write = true): Promise<boolean> => {
+      if (!target) return true;
+      const dir = await folderAccess(target, write).catch(() => null);
+      if (!dir) return true;
+      const name = baseName(dir) || dir;
+      const agreed = await new Promise<boolean>((resolve) =>
+        setConfirm({ title: t("accessTitle", { name }), body: t("accessBody", { name }), confirm: t("accessChoose"), run: () => resolve(true), cancel: () => resolve(false) }),
+      );
+      if (!agreed) return false;
+      const picked = await openDialog({ directory: true, defaultPath: dir, title: t("accessTitle", { name }) }).catch(() => null);
+      if (!picked || Array.isArray(picked)) return false;
+      const s = sep(dir);
+      const covers = dir === picked || dir.startsWith(picked.endsWith(s) ? picked : picked + s);
+      if (covers) {
+        await folderGrant(picked).catch(() => {});
+        if (!(await folderAccess(dir, write).catch(() => dir))) return true;
+      }
+      setToast({ kind: "err", text: covers ? t("accessDenied", { name }) : t("accessWrong", { name }) });
+      return false;
+    },
+    [t],
+  );
+  ensureFolderRef.current = ensureFolder;
+
   const startPack = useCallback(
     async (req: PackRequest) => {
       setPack(null);
+      if (!(await ensureFolder(dirName(req.output)))) return;
       await exclusive(async () => {
       const id = uid();
       setJob({ id, kind: "pack", progress: null });
@@ -245,7 +281,7 @@ export default function App() {
       }
       });
     },
-    [remember, t, lang, failToast, exclusive],
+    [remember, t, lang, failToast, exclusive, ensureFolder],
   );
 
   /** Extract one archive. `dest` defaults to the smart "Extract here" folder. Returns false if it stopped. */
@@ -278,6 +314,7 @@ export default function App() {
         failToast(e);
         return false;
       }
+      if (!(await ensureFolder(dest))) return false;
       // Ask once if files already exist at the destination.
       let onConflict: "skip" | "rename" | "overwrite" = "skip";
       try {
@@ -364,7 +401,7 @@ export default function App() {
       }
       });
     },
-    [askPassword, failToast, remember, t, lang, exclusive],
+    [askPassword, failToast, remember, t, lang, exclusive, ensureFolder],
   );
 
   // Right-click menu and "Open with Zipkoo".
@@ -420,6 +457,7 @@ export default function App() {
     async (change: Change) => {
       const a = archiveRef.current;
       if (!a) return;
+      if (!(await ensureFolder(dirName(a.info.path)))) return;
       const r = await runJob(t("editing"), (id) => editArchive(id, a.info.path, change, a.password));
       if (!r) return;
       setToast({ kind: "ok", text: t("edited", { added: num(r.added + r.replaced, lang), deleted: num(r.deleted, lang), renamed: num(r.renamed, lang) }), sub: r.skipped.length ? `${t("skippedNote", { n: num(r.skipped.length, lang) })}: ${r.skipped.slice(0, 3).map(baseName).join(", ")}` : undefined });
@@ -602,8 +640,8 @@ export default function App() {
   };
 
   const ctx: ViewCtx = useMemo(
-    () => ({ t, lang, toast: setToast, runJob, openPath: (p: string) => openPath(p), fail: failToast }),
-    [t, lang, runJob, openPath, failToast],
+    () => ({ t, lang, toast: setToast, runJob, openPath: (p: string) => openPath(p), fail: failToast, ensureFolder }),
+    [t, lang, runJob, openPath, failToast, ensureFolder],
   );
 
   const go = (v: View) => {
@@ -636,6 +674,7 @@ export default function App() {
     const res = await openDialog({ directory: true, title: t("updateHint"), defaultPath: dirName(archive.info.path) });
     if (!res || Array.isArray(res)) return;
     const { info, password } = archive;
+    if (!(await ensureFolder(dirName(info.path)))) return;
     const r = await runJob(t("updating"), (id) => updateArchive(id, info.path, [res], password));
     if (!r) return;
     setToast({ kind: "ok", text: t("updateDone", { v: num(r.version, lang), added: num(r.added, lang), changed: num(r.changed, lang), removed: num(r.removed, lang), unchanged: num(r.unchanged, lang) }) });
@@ -647,6 +686,7 @@ export default function App() {
     const src = convertTarget;
     setConvertTarget(null);
     if (!src) return;
+    if (!(await ensureFolder(dirName(src)))) return;
     const r = await runJob(t("converting"), (id) => convertArchives(id, [src], format, archive?.password));
     const first = r?.[0];
     if (!first) return;
@@ -763,7 +803,7 @@ export default function App() {
           confirm={confirm.confirm}
           cancel={t("cancel")}
           danger={confirm.danger}
-          onCancel={() => setConfirm(null)}
+          onCancel={() => { const c = confirm; setConfirm(null); c.cancel?.(); }}
           onConfirm={() => { const c = confirm; setConfirm(null); c.run(); }}
         >
           {confirm.extra === "replace" && (

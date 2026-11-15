@@ -4,3 +4,8 @@ app/dist/
 app/src-tauri/gen/
 *.part
 .DS_Store
+
+# Apple signing material never goes into git.
+app/src-tauri/macos/embedded.provisionprofile
+app/src-tauri/macos/*.generated.*
+*.pkg

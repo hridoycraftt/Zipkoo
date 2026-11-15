@@ -47,7 +47,7 @@ export interface ExtractReport {
 }
 
 export interface UiError {
-  code: "password_required" | "wrong_password" | "too_large" | "no_space" | "no_server" | "cancelled" | "unsupported" | "damaged" | "error";
+  code: "password_required" | "wrong_password" | "too_large" | "no_space" | "no_server" | "no_access" | "cancelled" | "unsupported" | "damaged" | "error";
   message: string;
 }
 
@@ -178,6 +178,9 @@ export const EDITABLE: Format[] = ["zip", "seven-z", "tar-zst"];
 export const extractConflicts = (q: { archive: string; dest: string; password?: string | null; only?: string[]; strip?: string | null }) =>
   invoke<string[]>("extract_conflicts", { q: { ...q, password: q.password ?? null } });
 export interface TestReport { files: number; bytes: number; errors: [string, string][] }
+/** null when Zipkoo may use `dir`; otherwise the existing folder the person must choose. */
+export const folderAccess = (dir: string, write: boolean) => invoke<string | null>("folder_access", { dir, write });
+export const folderGrant = (dir: string) => invoke<void>("folder_grant", { dir });
 export interface SalvageReport { output: string; recovered: number; bytes: number; lost: [string, string][] }
 export const salvageZip = (jobId: string, archive: string) => invoke<SalvageReport>("salvage_zip", { jobId, archive });
 export const testArchive = (jobId: string, archive: string, password?: string) => invoke<TestReport>("test_archive", { jobId, archive, password: password ?? null });

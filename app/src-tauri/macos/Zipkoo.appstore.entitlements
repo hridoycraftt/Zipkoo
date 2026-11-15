@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for the Mac App Store. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Files and folders the person opens, drops or picks in a dialog. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Remember chosen folders across restarts (watch folders, "Extract here"). -->
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+	<!-- Secure Share uploads to the share server the person sets. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Filled in by scripts/macos-appstore.sh from APPLE_TEAM_ID. -->
+	<key>com.apple.application-identifier</key>
+	<string>TEAM_ID.app.zipkoo.desktop</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>TEAM_ID</string>
+</dict>
+</plist>

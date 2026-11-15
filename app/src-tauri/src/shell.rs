@@ -49,6 +49,12 @@ pub fn is_installed() -> bool {
 }
 
 pub fn install() -> std::io::Result<()> {
+    if !supported() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "not available in this version",
+        ));
+    }
     let exe = std::env::current_exe()?;
     imp::install(&exe)
 }
@@ -57,8 +63,10 @@ pub fn uninstall() -> std::io::Result<()> {
     imp::uninstall()
 }
 
+/// The App Store build is sandboxed: it may not write Quick Actions into ~/Library/Services.
+/// There, Finder's "Open With" and the file types Zipkoo declares do the job instead.
 pub fn supported() -> bool {
-    cfg!(any(windows, target_os = "macos"))
+    cfg!(any(windows, target_os = "macos")) && !cfg!(feature = "appstore")
 }
 
 #[cfg(windows)]
