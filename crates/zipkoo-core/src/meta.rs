@@ -30,3 +30,31 @@ pub fn zip_round(t: SystemTime) -> Option<SystemTime> {
 pub fn set_mtime(path: &Path, t: SystemTime) {
     let _ = filetime::set_file_mtime(path, filetime::FileTime::from_system_time(t));
 }
+
+/// Windows "Mark of the Web": the Zone.Identifier stream that browsers attach to downloads.
+/// Copying it to extracted files keeps SmartScreen and Office Protected View working, as
+/// Explorer and 7-Zip do. No-op on other systems.
+#[cfg(windows)]
+pub fn motw_read(archive: &Path) -> Option<Vec<u8>> {
+    let mut s = archive.as_os_str().to_owned();
+    s.push(":Zone.Identifier");
+    let data = std::fs::read(std::path::PathBuf::from(s)).ok()?;
+    // Only zones 3 (Internet) and 4 (Restricted) matter.
+    let text = String::from_utf8_lossy(&data);
+    text.lines().any(|l| matches!(l.trim(), "ZoneId=3" | "ZoneId=4")).then_some(data)
+}
+
+#[cfg(not(windows))]
+pub fn motw_read(_archive: &Path) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(windows)]
+pub fn motw_write(file: &Path, data: &[u8]) {
+    let mut s = file.as_os_str().to_owned();
+    s.push(":Zone.Identifier");
+    let _ = std::fs::write(std::path::PathBuf::from(s), data);
+}
+
+#[cfg(not(windows))]
+pub fn motw_write(_file: &Path, _data: &[u8]) {}

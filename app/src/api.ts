@@ -172,3 +172,12 @@ export const openEntry = (archive: string, name: string, password?: string) => i
 export const prepareDrag = (archive: string, names: string[], password?: string) =>
   invoke<{ items: string[]; icon: string }>("prepare_drag", { archive, names, password: password ?? null });
 export const EDITABLE: Format[] = ["zip", "seven-z", "tar-zst"];
+
+export const extractConflicts = (q: { archive: string; dest: string; password?: string | null; only?: string[]; strip?: string | null }) =>
+  invoke<string[]>("extract_conflicts", { q: { ...q, password: q.password ?? null } });
+export interface TestReport { files: number; bytes: number; errors: [string, string][] }
+export const testArchive = (jobId: string, archive: string, password?: string) => invoke<TestReport>("test_archive", { jobId, archive, password: password ?? null });
+
+export interface AppInfo { version: string; flavor: "direct" | "appstore"; updater_ready: boolean; os: string }
+export const appInfo = () => invoke<AppInfo>("app_info");
+export const trashPath = (path: string) => invoke<void>("trash_path", { path });

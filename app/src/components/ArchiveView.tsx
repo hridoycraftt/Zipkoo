@@ -317,7 +317,7 @@ export function ArchiveView(props: Props) {
                     <span className="names">
                       <span className="leaf">{r.label}</span>
                       {r.kind === "folder" ? (
-                        <span className="path">{t("folderSummary", { files: n(r.files), size: human(r.size, lang) })}</span>
+                        <span className="path">{r.files === 1 ? t("folderSummaryOne", { size: human(r.size, lang) }) : t("folderSummary", { files: n(r.files), size: human(r.size, lang) })}</span>
                       ) : query && parentOf(r.name) ? (
                         <span className="path">{parentOf(r.name).slice(0, -1)}</span>
                       ) : null}
@@ -381,7 +381,7 @@ export function ArchiveView(props: Props) {
             ))}
           </ol>
         )}
-        {tab === "health" && <HealthPanel ctx={ctx} archive={info.path} />}
+        {tab === "health" && <HealthPanel ctx={ctx} archive={info.path} password={password} />}
         {tab === "preview" && (
           <>
             <div className="peek-head"><p>{t("previewSub")}</p></div>
@@ -391,7 +391,7 @@ export function ArchiveView(props: Props) {
               {peek.kind === "image" && <img src={peek.url} alt={focus?.label} />}
               {peek.kind === "pdf" && <object data={peek.url} type="application/pdf" aria-label={focus?.label} />}
               {peek.kind === "text" && <pre>{peek.text}</pre>}
-              {peek.kind === "folder" && <p className="peek-msg"><span className="ficon t-folder big"><Icon name="folder" size={28} /></span>{t("folderSummary", { files: n(peek.files), size: human(peek.size, lang) })}</p>}
+              {peek.kind === "folder" && <p className="peek-msg"><span className="ficon t-folder big"><Icon name="folder" size={28} /></span>{peek.files === 1 ? t("folderSummaryOne", { size: human(peek.size, lang) }) : t("folderSummary", { files: n(peek.files), size: human(peek.size, lang) })}</p>}
               {peek.kind === "none" && <p className="peek-msg">{t("peekNone")}</p>}
               {peek.kind === "error" && <p className="peek-msg">{peek.message}</p>}
             </div>

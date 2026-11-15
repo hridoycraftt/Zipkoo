@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-  asUiError, convertArchives, findDuplicates, healCheck, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
+  asUiError, convertArchives, findDuplicates, healCheck, testArchive, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
   shareDelete, shareDownload, sharesList, watchRemove, watchRunNow, watchSave, watchesList,
   type CloudFolder, type DupGroup, type FolderItem, type Health, type Hit, type IndexStats, type ShareRecord, type Watch,
 } from "../api";
@@ -336,11 +336,12 @@ export function ShareSheet({ t, name, onCancel, onCreate }: { t: T; name: string
 
 // ---------- Tools ----------
 
-export function HealthPanel({ ctx, archive }: { ctx: ViewCtx; archive: string }) {
+export function HealthPanel({ ctx, archive, password }: { ctx: ViewCtx; archive: string; password?: string }) {
   const { t, lang } = ctx;
   const [has, setHas] = useState<boolean | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [msg, setMsg] = useState<string>("");
+  const [testFailed, setTestFailed] = useState(false);
   const reload = useCallback(() => healStatus(archive).then((s) => setHas(s.has_repair_data)).catch(() => setHas(false)), [archive]);
   useEffect(() => {
     setHealth(null);
@@ -349,6 +350,7 @@ export function HealthPanel({ ctx, archive }: { ctx: ViewCtx; archive: string })
   }, [reload]);
 
   const check = async (fix: boolean) => {
+    setTestFailed(false);
     const h = await ctx.runJob(t("checking"), (id) => healCheck(id, archive, fix));
     if (!h) return;
     setHealth(h);
@@ -367,13 +369,21 @@ export function HealthPanel({ ctx, archive }: { ctx: ViewCtx; archive: string })
       reload();
     }
   };
+  const runTest = async () => {
+    const r = await ctx.runJob(t("testing"), (id) => testArchive(id, archive, password));
+    if (!r) return;
+    setHealth(null);
+    setMsg(r.errors.length === 0 ? t("testOk", { n: num(r.files, lang) }) : t("testBad", { n: num(r.errors.length, lang), list: r.errors.slice(0, 3).map(([n, why]) => `${n.split("/").pop()} (${why})`).join(", ") }));
+    setTestFailed(r.errors.length > 0);
+  };
   const fixable = health && !health.outdated && (health.damaged > 0 || !health.size_ok) && health.unrecoverable === 0 && health.repaired === 0;
   return (
     <div className="health">
       {has === false && <p className="muted-p">{t("noRepairData")}</p>}
-      {msg && <p className={`health-msg ${health && (health.unrecoverable > 0 || health.outdated) ? "err" : "ok-text"}`}>{msg}</p>}
+      {msg && <p className={`health-msg ${(health && (health.unrecoverable > 0 || health.outdated)) || testFailed ? "err" : "ok-text"}`}>{msg}</p>}
       {health?.outdated && <button className="btn small" onClick={add}>{t("addRepair")}</button>}
       <div className="row gap">
+        <button className="btn small" onClick={runTest}>{t("testArchive")}</button>
         {has && <button className="btn small" onClick={() => check(false)}>{t("checkHealth")}</button>}
         {fixable && <button className="btn primary small" onClick={() => check(true)}>{t("repair")}</button>}
         {has === false && <button className="btn small" onClick={add}>{t("addRepair")}</button>}

@@ -562,3 +562,63 @@ pub async fn prepare_drag(app: AppHandle, archive: PathBuf, names: Vec<String>, 
     .map_err(ui)?
     .map_err(Into::into)
 }
+
+// ---------- Conflicts and Test ----------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictQuery {
+    archive: PathBuf,
+    dest: PathBuf,
+    password: Option<String>,
+    #[serde(default)]
+    only: Vec<String>,
+    #[serde(default)]
+    strip: Option<String>,
+}
+
+#[tauri::command]
+pub async fn extract_conflicts(q: ConflictQuery) -> Result<Vec<String>, UiError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let opts = zipkoo_core::ExtractOptions { password: q.password.as_deref(), only: q.only, strip: q.strip, ..Default::default() };
+        zipkoo_core::conflicts(&q.archive, &q.dest, &opts)
+    })
+    .await
+    .map_err(ui)?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn test_archive(app: AppHandle, jobs: State<'_, Jobs>, job_id: String, archive: PathBuf, password: Option<String>) -> Result<zipkoo_core::TestReport, UiError> {
+    job(app, &jobs, job_id, move |emit, cancel| zipkoo_core::test(&archive, password.as_deref(), emit, Some(cancel))).await
+}
+
+// ---------- Settings support: app info, trash ----------
+
+#[derive(Serialize)]
+pub struct AppInfo {
+    version: String,
+    /// "direct" (our download, self-updating) or "appstore".
+    flavor: &'static str,
+    /// Updates are signed; without a public key configured the app never tries to update.
+    updater_ready: bool,
+    os: &'static str,
+}
+
+#[tauri::command]
+pub fn app_info(app: AppHandle) -> AppInfo {
+    let flavor = if cfg!(feature = "appstore") { "appstore" } else { "direct" };
+    let pubkey = app.config().plugins.0.get("updater").and_then(|u| u.get("pubkey")).and_then(|k| k.as_str()).unwrap_or("");
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        flavor,
+        updater_ready: flavor == "direct" && !pubkey.trim().is_empty(),
+        os: std::env::consts::OS,
+    }
+}
+
+/// Move a file to the Recycle Bin / Trash (used for "delete the archive after extracting").
+#[tauri::command]
+pub async fn trash_path(path: PathBuf) -> Result<(), UiError> {
+    tauri::async_runtime::spawn_blocking(move || trash::delete(&path)).await.map_err(ui)?.map_err(ui)
+}

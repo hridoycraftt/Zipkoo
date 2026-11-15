@@ -1,7 +1,8 @@
 /** The Zipkoo mark. `small` drops the zipper teeth for sizes under 32 px. */
 export function Mark({ size = 24, small = false, inverse = false }: { size?: number; small?: boolean; inverse?: boolean }) {
-  const bg = inverse ? "var(--ink)" : "var(--haldi)";
-  const fg = inverse ? "var(--haldi)" : "var(--ink)";
+  // Brand colors are fixed so the mark looks the same in light and dark mode.
+  const bg = inverse ? "#14161F" : "#F2A93B";
+  const fg = inverse ? "#F2A93B" : "#14161F";
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true">
       <rect x="4" y="4" width="92" height="92" rx="26" fill={bg} />

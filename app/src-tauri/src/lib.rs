@@ -298,14 +298,17 @@ fn bring_to_front(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Must be first: a second launch (a right-click on another file) hands its args to us.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             receive(app, argv.into_iter().skip(1).collect());
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(feature = "direct")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build()).plugin(tauri_plugin_process::init());
+    builder
         .manage(Jobs::default())
         .manage(Inbox::default())
         .manage(Pending::default())
@@ -365,7 +368,11 @@ pub fn run() {
             features::watch_run_now,
             features::edit_archive,
             features::open_entry,
-            features::prepare_drag
+            features::prepare_drag,
+            features::extract_conflicts,
+            features::test_archive,
+            features::app_info,
+            features::trash_path
         ])
         .build(tauri::generate_context!())
         .expect("error while building Zipkoo")

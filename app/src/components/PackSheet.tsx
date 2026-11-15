@@ -21,6 +21,7 @@ interface Props {
   sfxEnabled: boolean;
   clouds?: CloudFolder[];
   preset?: PackPreset;
+  defaults?: { format: PackRequest["format"]; level: Level; smart: boolean };
   onCancel: () => void;
   onStart: (req: PackRequest) => void;
 }
@@ -33,12 +34,12 @@ const SPLITS: { label: string; bytes: number | null }[] = [
   { label: "4 GB", bytes: 4 * 1024 ** 3 - 1 },
 ];
 
-export function PackSheet({ t, lang, inputs, sfxEnabled, clouds = [], preset, onCancel, onStart }: Props) {
+export function PackSheet({ t, lang, inputs, sfxEnabled, clouds = [], preset, defaults, onCancel, onStart }: Props) {
   const [shrink, setShrink] = useState(false);
   const [repair, setRepair] = useState(false);
-  const [choice, setChoice] = useState<Choice>(preset?.sfx && sfxEnabled ? "sfx" : "zip");
-  const [level, setLevel] = useState<Level>("normal");
-  const [smart, setSmart] = useState(true);
+  const [choice, setChoice] = useState<Choice>(preset?.sfx && sfxEnabled ? "sfx" : defaults?.format ?? "zip");
+  const [level, setLevel] = useState<Level>(defaults?.level ?? "normal");
+  const [smart, setSmart] = useState(defaults?.smart ?? true);
   const [lock, setLock] = useState(!!preset?.lock);
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");

@@ -65,6 +65,8 @@ pub struct ExtractReport {
 }
 
 struct Ctx<'o, 'r, 'a> {
+    /// Windows "Mark of the Web" copied from a downloaded archive to every file it produces.
+    motw: Option<Vec<u8>>,
     dest: &'o Path,
     opts: &'o ExtractOptions<'o>,
     budget: Budget,
@@ -145,6 +147,10 @@ impl Ctx<'_, '_, '_> {
         match res {
             Ok(n) => {
                 w.flush()?;
+                drop(w);
+                if let Some(zone) = &self.motw {
+                    crate::meta::motw_write(out, zone);
+                }
                 self.report.files += 1;
                 self.report.bytes += n;
                 Ok(())
@@ -181,6 +187,7 @@ pub fn extract(
     }
     let mut rep = Reporter::new(on_progress, cancel, total);
     let mut ctx = Ctx {
+        motw: crate::meta::motw_read(path),
         dest,
         opts,
         budget: Budget::for_archive(archive_size, opts.max_ratio, opts.floor, declared, opts.hard_cap),
@@ -349,4 +356,215 @@ pub fn suggest_dest(archive: &Path, info: &crate::inspect::ArchiveInfo) -> Extra
     }
     let dest = crate::pack::unique_path(&parent.join(&stem));
     ExtractTarget { dest: dest.clone(), result: dest, strip: None }
+}
+
+/// Files this extraction would collide with (existing files at the destination), so the UI can
+/// ask once: skip, keep both, or replace. Uses the same naming rules as `extract`.
+pub fn conflicts(path: &Path, dest: &Path, opts: &ExtractOptions) -> Result<Vec<String>> {
+    let info = crate::inspect::inspect(path, opts.password)?;
+    let mut out = Vec::new();
+    for e in info.entries.iter().filter(|e| !e.is_dir) {
+        let name = e.name.trim_start_matches("./");
+        if name.starts_with(crate::update::ZIPKOO_DIR) && opts.only.is_empty() {
+            continue;
+        }
+        if !opts.only.is_empty() && !opts.only.iter().any(|o| name == o || name.starts_with(&format!("{}/", o.trim_end_matches('/')))) {
+            continue;
+        }
+        let rel = match &opts.strip {
+            Some(p) => match name.strip_prefix(p.as_str()) {
+                Some(r) if !r.is_empty() => r,
+                _ => continue,
+            },
+            None => name,
+        };
+        if let Ok(target) = safe_join(dest, rel) {
+            if target.is_file() {
+                out.push(rel.to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct TestReport {
+    pub files: usize,
+    pub bytes: u64,
+    /// Entries that failed their checksum or couldn't be read, with the reason.
+    pub errors: Vec<(String, String)>,
+}
+
+impl TestReport {
+    pub fn ok(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
+/// Read every file in the archive and check its checksum (CRC-32 for ZIP/7z/RAR, the zstd/xz
+/// frame checks for compressed TARs) without writing anything.
+pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Progress), cancel: Option<&AtomicBool>) -> Result<TestReport> {
+    let (real, format, _, _guard) = resolve(path)?;
+    let total = crate::inspect::inspect(path, password).map(|i| i.total_size).unwrap_or(0);
+    let mut rep = Reporter::new(on_progress, cancel, total);
+    let mut r = TestReport::default();
+    let sink = |rd: &mut dyn std::io::Read, rep: &mut Reporter| -> std::io::Result<u64> {
+        let mut buf = vec![0u8; 1 << 16];
+        let mut n = 0u64;
+        loop {
+            let k = rd.read(&mut buf)?;
+            if k == 0 {
+                return Ok(n);
+            }
+            n += k as u64;
+            rep.add(k as u64)?;
+        }
+    };
+    match format {
+        Format::Zip => {
+            let mut z = crate::inspect::open_zip(&real)?;
+            for i in 0..z.len() {
+                let (name, is_dir, enc) = {
+                    let f = z.by_index_raw(i)?;
+                    (f.name()?.to_string(), f.is_dir(), f.encrypted())
+                };
+                if is_dir {
+                    continue;
+                }
+                if enc && password.is_none() {
+                    return Err(Error::PasswordRequired);
+                }
+                rep.set_current(&name);
+                let res = match (enc, password) {
+                    (true, Some(pw)) => z.by_index_decrypt(i, pw.as_bytes()),
+                    _ => z.by_index(i),
+                };
+                match res {
+                    Ok(mut f) => match sink(&mut f, &mut rep) {
+                        Ok(n) => {
+                            r.files += 1;
+                            r.bytes += n;
+                        }
+                        Err(e) if e.to_string().contains("zipkoo: cancelled") => return Err(Error::Cancelled),
+                        Err(e) => r.errors.push((name, e.to_string())),
+                    },
+                    Err(zip::result::ZipError::InvalidPassword) => return Err(Error::WrongPassword),
+                    Err(e) => r.errors.push((name, e.to_string())),
+                }
+            }
+        }
+        Format::SevenZ => {
+            let pw = password.map(sevenz_rust2::Password::from).unwrap_or_else(sevenz_rust2::Password::empty);
+            let mut ar = sevenz_rust2::ArchiveReader::open(&real, pw)?;
+            let mut errors = Vec::new();
+            let res = ar.for_each_entries(|entry, reader| {
+                if entry.is_directory {
+                    return Ok(true);
+                }
+                rep.set_current(&entry.name);
+                match sink(reader, &mut rep) {
+                    Ok(n) => {
+                        r.files += 1;
+                        r.bytes += n;
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        errors.push((entry.name.clone(), e.to_string()));
+                        // A broken solid block can't be read past; stop here.
+                        Ok(false)
+                    }
+                }
+            });
+            if let Err(e) = res {
+                let e: Error = e.into();
+                match e {
+                    Error::PasswordRequired | Error::WrongPassword | Error::Cancelled => return Err(e),
+                    other => errors.push(("(archive)".into(), other.to_string())),
+                }
+            }
+            if errors.iter().any(|(_, m)| m.contains("zipkoo: cancelled")) {
+                return Err(Error::Cancelled);
+            }
+            r.errors.extend(errors);
+        }
+        Format::Rar => {
+            let mut a = match password {
+                Some(pw) => unrar::Archive::with_password(&real, pw),
+                None => unrar::Archive::new(&real),
+            }
+            .open_for_processing()?;
+            while let Some(h) = a.read_header()? {
+                let name = h.entry().filename.to_string_lossy().replace('\\', "/");
+                let size = h.entry().unpacked_size;
+                let is_file = h.entry().is_file();
+                rep.set_current(&name);
+                a = if is_file {
+                    match h.test() {
+                        Ok(next) => {
+                            r.files += 1;
+                            r.bytes += size;
+                            rep.add(size).map_err(|_| Error::Cancelled)?;
+                            next
+                        }
+                        Err(e) => {
+                            let e: Error = e.into();
+                            if matches!(e, Error::WrongPassword | Error::PasswordRequired) {
+                                return Err(e);
+                            }
+                            r.errors.push((name, e.to_string()));
+                            break;
+                        }
+                    }
+                } else {
+                    h.skip()?
+                };
+            }
+        }
+        _ => {
+            let mut t = tar::Archive::new(crate::inspect::tar_reader(&real, format)?);
+            {
+                let entries = match t.entries() {
+                    Ok(e) => e,
+                    Err(e) => {
+                        r.errors.push(("(archive)".into(), e.to_string()));
+                        return Ok(r);
+                    }
+                };
+                for e in entries {
+                    let mut e = match e {
+                        Ok(e) => e,
+                        Err(err) => {
+                            r.errors.push(("(archive)".into(), err.to_string()));
+                            break;
+                        }
+                    };
+                    if !e.header().entry_type().is_file() {
+                        continue;
+                    }
+                    let name = e.path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                    rep.set_current(&name);
+                    match sink(&mut e, &mut rep) {
+                        Ok(n) => {
+                            r.files += 1;
+                            r.bytes += n;
+                        }
+                        Err(err) if err.to_string().contains("zipkoo: cancelled") => return Err(Error::Cancelled),
+                        Err(err) => {
+                            r.errors.push((name, err.to_string()));
+                            break;
+                        }
+                    }
+                }
+            }
+            // The compressed stream's own checksum (zstd/xz/gzip) is only checked at its end,
+            // past the last file, so read whatever is left.
+            if r.errors.is_empty() {
+                if let Err(err) = std::io::copy(&mut t.into_inner(), &mut std::io::sink()) {
+                    r.errors.push(("(archive)".into(), err.to_string()));
+                }
+            }
+        }
+    }
+    rep.finish();
+    Ok(r)
 }

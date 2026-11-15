@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "Self-update (direct downloads only; absent from the App Store build)",
+  "windows": ["main"],
+  "permissions": ["updater:default", "process:allow-restart"]
+}

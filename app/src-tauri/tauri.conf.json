@@ -95,5 +95,16 @@
       }
     }
   },
-  "mainBinaryName": "Zipkoo"
+  "mainBinaryName": "Zipkoo",
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/hridoycraftt/Zipkoo/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
 }

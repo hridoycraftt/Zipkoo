@@ -3,8 +3,12 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath as osOpen, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
+import { check as checkUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { applyTheme, loadSettings, saveSettings, type Settings } from "./settings";
+import { SettingsView } from "./components/SettingsView";
 import {
-  EDITABLE, editArchive, openEntry, prepareDrag, type Change, type Entry,
+  EDITABLE, appInfo, editArchive, extractConflicts, trashPath, openEntry, prepareDrag, type Change, type Entry,
   cloudFolders, convertArchives, shareFile, updateArchive, type CloudFolder,
   asUiError, cancelJob, extractArchive, inspectArchive, isArchive, onProgress, onShellActions, packFiles, sfxAvailable,
   shellSet, shellStatus, suggestExtractDest, suggestPackOutput, takeShellActions,
@@ -20,7 +24,7 @@ import { PackSheet, type PackPreset } from "./components/PackSheet";
 import { ConfirmDialog, PasswordDialog, ProgressOverlay, PromptDialog, Toast, type ToastData } from "./components/Overlays";
 import { FolderView, SearchView, SharesView, ShareSheet, ToolsView, WatchView, type ViewCtx } from "./components/Views";
 
-type View = { kind: "home" | "search" | "watch" | "shares" | "tools" } | { kind: "cloud"; folder: CloudFolder };
+type View = { kind: "home" | "search" | "watch" | "shares" | "tools" | "settings" } | { kind: "cloud"; folder: CloudFolder };
 
 const store = {
   get<T>(k: string, d: T): T {
@@ -56,6 +60,17 @@ export default function App() {
   const [skipPrograms, setSkipPrograms] = useState(true);
   const [sfxOk, setSfxOk] = useState(false);
   const [shell, setShell] = useState<ShellStatus>({ supported: false, installed: false });
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const updateSettings = useCallback((patch: Partial<Settings>) => {
+    setSettings((cur) => {
+      const next = { ...cur, ...patch };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+  useEffect(() => applyTheme(settings.theme), [settings.theme]);
   const [view, setView] = useState<View>({ kind: "home" });
   const [clouds, setClouds] = useState<CloudFolder[]>([]);
   const [shareServer, setShareServerState] = useState<string>(() => store.get("shareServer", ""));
@@ -71,6 +86,7 @@ export default function App() {
   const [confirm, setConfirm] = useState<null | { title: string; body?: string; confirm: string; danger?: boolean; run: () => void; extra?: "replace"; alt?: { label: string; run: () => void } }>(null);
   const [replaceOnAdd, setReplaceOnAdd] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [conflictAsk, setConflictAsk] = useState<null | { names: string[]; folder: string; resolve: (c: "skip" | "rename" | "overwrite" | null) => void }>(null);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -158,7 +174,7 @@ export default function App() {
         }
         setPwPrompt(null);
         setArchive({ info, password });
-        setSkipPrograms(info.executables.length > 0);
+        setSkipPrograms(settingsRef.current.skipPrograms);
         remember(path);
       } catch (err) {
         const e = asUiError(err);
@@ -224,6 +240,19 @@ export default function App() {
         failToast(e);
         return false;
       }
+      // Ask once if files already exist at the destination.
+      let onConflict: "skip" | "rename" | "overwrite" = "skip";
+      try {
+        const clash = await extractConflicts({ archive: path, dest, password: opts.password, only: opts.only ?? [], strip });
+        if (clash.length) {
+          const choice = await new Promise<"skip" | "rename" | "overwrite" | null>((resolve) => setConflictAsk({ names: clash, folder: baseName(result), resolve }));
+          setConflictAsk(null);
+          if (!choice) return false;
+          onConflict = choice;
+        }
+      } catch {
+        /* the extraction itself will report real problems */
+      }
       return exclusive(async (): Promise<boolean> => {
       const id = uid();
       setJob({ id, kind: "extract", title: opts.title, progress: null });
@@ -236,11 +265,30 @@ export default function App() {
           allowPrograms: opts.allowPrograms ?? true,
           only: opts.only ?? [],
           strip,
+          onConflict,
         });
         remember(path);
+        const prefs = settingsRef.current;
+        if (prefs.openAfterExtract) revealItemInDir(result).catch(() => {});
+        let trashed = false;
+        // Only when everything came out fine, the whole archive was extracted, and it's a single file.
+        if (prefs.trashAfterExtract && r.skipped.length === 0 && !(opts.only ?? []).length && !/\.\d{3}$/.test(path)) {
+          try {
+            await trashPath(path);
+            trashed = true;
+            setRecent((rs) => {
+              const next = rs.filter((x) => x !== path);
+              store.set("recent", next);
+              return next;
+            });
+            if (archiveRef.current?.info.path === path) setArchive(null);
+          } catch {
+            /* leave it in place */
+          }
+        }
         setToast({
           kind: "ok",
-          text: t("extractedToast", { n: num(r.files, lang), dest: baseName(result) }),
+          text: t("extractedToast", { n: num(r.files, lang), dest: baseName(result) }) + (trashed ? ` ${t("movedToTrash")}` : ""),
           sub: r.skipped.length ? `${t("skippedNote", { n: num(r.skipped.length, lang) })}: ${r.skipped.slice(0, 3).map(([n, why]) => `${baseName(n)} (${why})`).join(", ")}` : undefined,
           action: { label: t("showInFolder"), run: () => revealItemInDir(result) },
         });
@@ -273,7 +321,7 @@ export default function App() {
       switch (a.action) {
         case "zip-here": {
           const output = await suggestPackOutput(paths, "zip");
-          if (output) await startPack({ inputs: paths, output, format: "zip", level: "normal", smart: true, password: null, hideNames: false, splitSize: null, sfx: false });
+          if (output) await startPack({ inputs: paths, output, format: "zip", level: settingsRef.current.defaultLevel, smart: settingsRef.current.smart, password: null, hideNames: false, splitSize: null, sfx: false });
           break;
         }
         case "lock":
@@ -420,13 +468,50 @@ export default function App() {
   const extractFromView = async (only: string[], chooseDest: boolean) => {
     if (!archive) return;
     let parent: string | undefined;
-    if (chooseDest) {
+    if (chooseDest || settings.extractAsk) {
       const d = await openDialog({ directory: true, defaultPath: dirName(archive.info.path) });
       if (!d || Array.isArray(d)) return;
       parent = d;
     }
     await runExtract(archive.info.path, { password: archive.password, only, parent, allowPrograms: !skipPrograms });
   };
+
+  const checkUpdates = useCallback(
+    async (silent = false): Promise<string> => {
+      try {
+        const u = await checkUpdate();
+        if (!u) return t("upToDate");
+        setToast({
+          kind: "info",
+          text: t("updateAvailable", { v: u.version }),
+          action: {
+            label: t("installRestart"),
+            run: () => {
+              runJob(t("working"), async () => {
+                await u.downloadAndInstall();
+                await relaunch();
+              });
+            },
+          },
+        });
+        return t("updateAvailable", { v: u.version });
+      } catch (e) {
+        const msg = t("updateFailed", { msg: asUiError(e).message });
+        if (!silent) return msg;
+        return msg;
+      }
+    },
+    [t, runJob],
+  );
+  useEffect(() => {
+    // Quietly look for an update once at start (direct downloads with signing set up only).
+    appInfo()
+      .then((i) => {
+        if (i.flavor === "direct" && i.updater_ready && settingsRef.current.autoUpdate) checkUpdates(true);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleShell = async () => {
     try {
@@ -502,6 +587,7 @@ export default function App() {
           ["watch", "clock", t("navWatch")],
           ["shares", "lock", t("navShares")],
           ["tools", "shield", t("navTools")],
+          ["settings", "settings", t("navSettings")],
         ] as const).map(([k, icon, label]) => (
           <button key={k} className={`nav ${!archive && view.kind === k ? "on" : ""}`} onClick={() => go({ kind: k })}>
             <Icon name={icon} />
@@ -525,13 +611,6 @@ export default function App() {
           ))}
         </div>
         <div className="side-foot">
-          {shell.supported && (
-            <label className="switch side-switch" title={shell.installed ? t("rightClickOn") : t("rightClickOff")}>
-              <input id="shell-menu" type="checkbox" role="switch" checked={shell.installed} onChange={toggleShell} />
-              <span className="track" aria-hidden="true" />
-              {t("rightClick")}
-            </label>
-          )}
           <button className="btn quiet small" onClick={() => setLang(lang === "en" ? "bn" : "en")}>
             <Icon name="globe" size={16} />
             {t("lang")}
@@ -579,6 +658,8 @@ export default function App() {
           <WatchView ctx={ctx} />
         ) : view.kind === "shares" ? (
           <SharesView ctx={ctx} server={shareServer} setServer={setShareServer} askPassword={(name, retry, wrong) => setPwPrompt({ path: name, error: wrong ? t("wrongPw") : undefined, then: (pw) => { setPwPrompt(null); retry(pw); } })} />
+        ) : view.kind === "settings" ? (
+          <SettingsView t={t} lang={lang} setLang={setLang} settings={settings} update={updateSettings} shell={shell} toggleShell={toggleShell} shareServer={shareServer} setShareServer={setShareServer} checkUpdates={() => checkUpdates(false)} />
         ) : view.kind === "tools" ? (
           <ToolsView ctx={ctx} />
         ) : view.kind === "cloud" ? (
@@ -594,7 +675,7 @@ export default function App() {
           <span>{t("dragHere")}</span>
         </div>
       )}
-      {pack && <PackSheet t={t} lang={lang} inputs={pack.inputs} preset={pack.preset} sfxEnabled={sfxOk} clouds={clouds} onCancel={() => setPack(null)} onStart={startPack} />}
+      {pack && <PackSheet t={t} lang={lang} inputs={pack.inputs} preset={pack.preset} sfxEnabled={sfxOk} clouds={clouds} defaults={{ format: settings.defaultFormat, level: settings.defaultLevel, smart: settings.smart }} onCancel={() => setPack(null)} onStart={startPack} />}
       {confirm && (
         <ConfirmDialog
           title={confirm.title}
@@ -613,6 +694,24 @@ export default function App() {
           )}
           {confirm.alt && <button className="link" onClick={() => { const c = confirm; setConfirm(null); c.alt!.run(); }}>{confirm.alt.label}</button>}
         </ConfirmDialog>
+      )}
+      {conflictAsk && (
+        <div className="scrim" role="alertdialog" aria-modal="true" aria-labelledby="conflict-title" onKeyDown={(e) => e.key === "Escape" && conflictAsk.resolve(null)}>
+          <div className="sheet narrow">
+            <h2 id="conflict-title">{t("conflictTitle", { n: num(conflictAsk.names.length, lang) })}</h2>
+            <p>{t("conflictBody", { folder: conflictAsk.folder })}</p>
+            <ul className="inputs">
+              {conflictAsk.names.slice(0, 5).map((n) => <li key={n} title={n}>{baseName(n)}</li>)}
+              {conflictAsk.names.length > 5 && <li className="muted">+{num(conflictAsk.names.length - 5, lang)}</li>}
+            </ul>
+            <div className="row gap end">
+              <button className="btn quiet" onClick={() => conflictAsk.resolve(null)}>{t("cancel")}</button>
+              <button className="btn" onClick={() => conflictAsk.resolve("skip")}>{t("skipThem")}</button>
+              <button className="btn" onClick={() => conflictAsk.resolve("overwrite")}>{t("replaceAll")}</button>
+              <button className="btn primary" autoFocus onClick={() => conflictAsk.resolve("rename")}>{t("keepBoth")}</button>
+            </div>
+          </div>
+        </div>
       )}
       {renaming && archive && (
         <PromptDialog

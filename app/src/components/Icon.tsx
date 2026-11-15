@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Alert02Icon, Cancel01Icon, CheckmarkCircle02Icon, Clock01Icon, ComputerTerminal01Icon, Download04Icon,
   File01Icon, FileZipIcon, Folder01Icon, FolderExportIcon, Globe02Icon, Home09Icon, Image02Icon,
-  InformationCircleIcon, Note01Icon, PackageIcon, Search01Icon, Shield01Icon, SquareLock02Icon,
+  InformationCircleIcon, Moon02Icon, Note01Icon, Settings02Icon, Sun03Icon, ComputerIcon, PackageIcon, Search01Icon, Shield01Icon, SquareLock02Icon,
 } from "@hugeicons/core-free-icons";
 
 const ICONS = {
@@ -26,6 +26,10 @@ const ICONS = {
   globe: Globe02Icon,
   info: InformationCircleIcon,
   alert: Alert02Icon,
+  settings: Settings02Icon,
+  moon: Moon02Icon,
+  sun: Sun03Icon,
+  computer: ComputerIcon,
 };
 
 export type IconName = keyof typeof ICONS;
