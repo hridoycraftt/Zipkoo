@@ -9,3 +9,4 @@ app/src-tauri/gen/
 app/src-tauri/macos/embedded.provisionprofile
 app/src-tauri/macos/*.generated.*
 *.pkg
+dist-mac/
