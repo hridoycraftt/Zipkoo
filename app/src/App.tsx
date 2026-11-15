@@ -9,6 +9,7 @@ import {
 import { makeT, type Lang } from "./i18n";
 import { baseName, dirName, human, num, sep, stripArchiveExt, uid } from "./util";
 import { Mark } from "./components/Mark";
+import { Icon } from "./components/Icon";
 import { Home } from "./components/Home";
 import { ArchiveView } from "./components/ArchiveView";
 import { PackSheet } from "./components/PackSheet";
@@ -183,23 +184,30 @@ export default function App() {
 
   return (
     <div className={`app ${dragging ? "dragging" : ""}`}>
-      <nav className="side">
+      <nav className="side" aria-label="Zipkoo">
         <div className="brand">
-          <Mark size={28} />
+          <Mark size={30} />
           <span className="wordmark">zipkoo</span>
         </div>
-        <button className={`nav ${!archive ? "on" : ""}`} onClick={() => setArchive(null)}>{t("home")}</button>
-        <h2 className="eyebrow">{t("recent")}</h2>
+        <button className={`nav ${!archive ? "on" : ""}`} onClick={() => setArchive(null)}>
+          <Icon name="home" />
+          {t("home")}
+        </button>
+        <h2 className="side-label">{t("recent")}</h2>
         <div className="side-recent">
           {recent.slice(0, 8).map((p) => (
-            <button key={p} className={`nav small ${archive?.info.path === p ? "on" : ""}`} title={p} onClick={() => openPath(p)}>
-              {baseName(p)}
+            <button key={p} className={`nav file ${archive?.info.path === p ? "on" : ""}`} title={p} onClick={() => openPath(p)}>
+              <Icon name="clock" size={16} />
+              <span className="ellipsis">{baseName(p)}</span>
             </button>
           ))}
         </div>
         <div className="side-foot">
-          <button className="btn ghost small" onClick={() => setLang(lang === "en" ? "bn" : "en")}>{t("lang")}</button>
-          <span className="muted small">{t("tagline")}</span>
+          <button className="btn quiet small" onClick={() => setLang(lang === "en" ? "bn" : "en")}>
+            <Icon name="globe" size={16} />
+            {t("lang")}
+          </button>
+          <p className="motto">{t("tagline")}</p>
         </div>
       </nav>
 

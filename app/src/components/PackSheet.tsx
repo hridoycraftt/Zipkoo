@@ -76,8 +76,8 @@ export function PackSheet({ t, lang, inputs, onCancel, onStart }: Props) {
   return (
     <div className="scrim" role="dialog" aria-modal="true" aria-labelledby="pack-title">
       <form className="sheet" onSubmit={submit}>
-        <h2 id="pack-title">{t("packTitle", { n: lang === "bn" ? toBn(String(n)) : n })}</h2>
-        <ul className="inputs mono small">
+        <h2 id="pack-title">{n === 1 ? t("packTitleOne") : t("packTitle", { n: lang === "bn" ? toBn(String(n)) : n })}</h2>
+        <ul className="inputs">
           {inputs.slice(0, 4).map((p) => <li key={p} title={p}>{baseName(p)}</li>)}
           {n > 4 && <li className="muted">+{num(n - 4, lang)}</li>}
         </ul>
@@ -113,7 +113,7 @@ export function PackSheet({ t, lang, inputs, onCancel, onStart }: Props) {
         {canLock && (
           <label className="toggle">
             <input id="lock" type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} />
-            <span><b>🔒 {t("lock")}</b><small>{t("lockHint")}</small></span>
+            <span><b>{t("lock")}</b><small>{t("lockHint")}</small></span>
           </label>
         )}
         {lock && canLock && (
@@ -143,13 +143,13 @@ export function PackSheet({ t, lang, inputs, onCancel, onStart }: Props) {
         </fieldset>
 
         <div className="saveas">
-          <span className="eyebrow">{t("saveAs")}</span>
+          <span className="saveas-label">{t("saveAs")}</span>
           <span className="mono small path" title={output}>{output}</span>
-          <button type="button" className="btn ghost small" onClick={pick}>{t("change")}</button>
+          <button type="button" className="btn quiet small" onClick={pick}>{t("change")}</button>
         </div>
 
         <div className="row gap end">
-          <button type="button" className="btn ghost" onClick={onCancel}>{t("cancel")}</button>
+          <button type="button" className="btn quiet" onClick={onCancel}>{t("cancel")}</button>
           <button type="submit" className="btn primary" disabled={!!pwError}>{t("zipIt")}</button>
         </div>
       </form>

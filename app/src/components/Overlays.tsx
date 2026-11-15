@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Progress } from "../api";
 import type { Lang, makeT } from "../i18n";
 import { human, toBn } from "../util";
+import { Icon } from "./Icon";
 
 type T = ReturnType<typeof makeT>;
 
@@ -25,7 +26,7 @@ export function ProgressOverlay({ t, lang, title, progress, onCancel }: { t: T; 
           </span>
         </div>
         <div className="row end">
-          <button className="btn ghost" onClick={onCancel}>{t("cancel")}</button>
+          <button className="btn quiet" onClick={onCancel}>{t("cancel")}</button>
         </div>
       </div>
     </div>
@@ -45,12 +46,13 @@ export function PasswordDialog({ t, name, error, onSubmit, onCancel }: { t: T; n
           if (pw) onSubmit(pw);
         }}
       >
-        <h2 id="pw-title">🔒 {t("pwTitle")}</h2>
+        <div className="dialog-icon"><Icon name="lock" size={22} /></div>
+        <h2 id="pw-title">{t("pwTitle")}</h2>
         <p className="muted">{t("pwSub", { name })}</p>
         <input id="open-pw" ref={ref} type="password" autoComplete="current-password" placeholder={t("password")} value={pw} onChange={(e) => setPw(e.target.value)} />
         {error && <p className="err small">{error}</p>}
         <div className="row gap end">
-          <button type="button" className="btn ghost" onClick={onCancel}>{t("cancel")}</button>
+          <button type="button" className="btn quiet" onClick={onCancel}>{t("cancel")}</button>
           <button type="submit" className="btn primary" disabled={!pw}>{t("open")}</button>
         </div>
       </form>
@@ -72,12 +74,13 @@ export function Toast({ toast, onDone }: { toast: ToastData; onDone: () => void 
   }, [toast, onDone]);
   return (
     <div className={`toast ${toast.kind}`} role="status">
+      <span className="toast-icon"><Icon name={toast.kind === "ok" ? "check" : toast.kind === "err" ? "alert" : "info"} size={18} /></span>
       <div>
         <b>{toast.text}</b>
         {toast.sub && <small>{toast.sub}</small>}
       </div>
       {toast.action && <button className="btn small" onClick={toast.action.run}>{toast.action.label}</button>}
-      <button className="x" aria-label="Dismiss" onClick={onDone}>×</button>
+      <button className="x" aria-label="Dismiss" onClick={onDone}><Icon name="x" size={16} /></button>
     </div>
   );
 }
