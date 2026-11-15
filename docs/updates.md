@@ -13,13 +13,13 @@ Every time Zipkoo starts, it checks for a newer version. If one exists, it asks:
 
 Zipkoo only installs updates that are signed with your key, so nobody else can push a fake update.
 
-1. Make the key pair (choose a password when asked):
+1. Make the key pair (no password, so only one secret is needed):
 
 ```bash
-npx @tauri-apps/cli signer generate -w ~/.tauri/zipkoo.key
+npx @tauri-apps/cli signer generate -w ~/.tauri/zipkoo.key -p "" --ci
 ```
 
-2. **Back up `~/.tauri/zipkoo.key` and its password** (a password manager is fine). If you lose them, the copies people already installed can never update again.
+2. **Back up `~/.tauri/zipkoo.key` and its password** (a password manager is fine). If you lose it, the copies people already installed can never update again.
 3. On GitHub, go to repo → Settings → Secrets and variables → Actions → New repository secret, and add:
    - `TAURI_SIGNING_PRIVATE_KEY`: the full contents of `~/.tauri/zipkoo.key`
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
