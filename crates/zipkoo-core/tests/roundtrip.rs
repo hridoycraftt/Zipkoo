@@ -7,7 +7,13 @@ fn sample(dir: &Path) -> PathBuf {
     let root = dir.join("Photos");
     fs::create_dir_all(root.join("raw/empty")).unwrap();
     fs::write(root.join("notes.txt"), "hello zipkoo\n".repeat(5000)).unwrap();
-    fs::write(root.join("raw/IMG_0412.jpg"), (0..200_000u32).map(|i| (i.wrapping_mul(2654435761u32) >> 24) as u8).collect::<Vec<_>>()).unwrap();
+    fs::write(
+        root.join("raw/IMG_0412.jpg"),
+        (0..200_000u32)
+            .map(|i| (i.wrapping_mul(2654435761u32) >> 24) as u8)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
     fs::write(root.join("বাংলা নাম.txt"), "আপনার ফাইল").unwrap();
     root
 }
@@ -19,7 +25,12 @@ fn same_tree(a: &Path, b: &Path) {
         let other = b.join(rel);
         assert!(other.exists(), "missing {}", other.display());
         if e.file_type().is_file() {
-            assert_eq!(fs::read(e.path()).unwrap(), fs::read(&other).unwrap(), "differs {}", rel.display());
+            assert_eq!(
+                fs::read(e.path()).unwrap(),
+                fs::read(&other).unwrap(),
+                "differs {}",
+                rel.display()
+            );
         }
     }
 }
@@ -28,33 +39,61 @@ fn roundtrip(format: Format, password: Option<&str>) {
     let t = tempfile::tempdir().unwrap();
     let src = sample(t.path());
     let out = t.path().join(format!("out.{}", format.extension()));
-    let opts = PackOptions { format, password: password.map(String::from), ..Default::default() };
+    let opts = PackOptions {
+        format,
+        password: password.map(String::from),
+        ..Default::default()
+    };
     let rep = pack(&[src.clone()], &out, &opts, &mut |_| {}, None).unwrap();
     assert_eq!(rep.files, 3);
     let expect_stored = if format == Format::TarZst { 0 } else { 1 };
-    assert_eq!(rep.stored_as_is, expect_stored, "smart compress should store the jpg");
+    assert_eq!(
+        rep.stored_as_is, expect_stored,
+        "smart compress should store the jpg"
+    );
     assert!(rep.output_bytes < rep.input_bytes);
 
     let info = inspect(&out, password).unwrap();
     assert_eq!(info.format, format);
     assert_eq!(info.file_count, 3);
-    assert_eq!(info.encrypted, password.is_some() && format != Format::SevenZ || info.encrypted);
+    assert_eq!(
+        info.encrypted,
+        password.is_some() && format != Format::SevenZ || info.encrypted
+    );
 
     let peeked = peek(&out, "Photos/notes.txt", password, 1 << 20).unwrap();
     assert!(peeked.starts_with(b"hello zipkoo"));
 
     let dest = t.path().join("x");
-    let eopts = ExtractOptions { password, ..Default::default() };
+    let eopts = ExtractOptions {
+        password,
+        ..Default::default()
+    };
     let r = extract(&out, &dest, &eopts, &mut |_| {}, None).unwrap();
     assert_eq!(r.files, 3);
     same_tree(&src, &dest.join("Photos"));
 }
 
-#[test] fn zip_plain() { roundtrip(Format::Zip, None) }
-#[test] fn zip_aes() { roundtrip(Format::Zip, Some("s3cret")) }
-#[test] fn sevenz_plain() { roundtrip(Format::SevenZ, None) }
-#[test] fn sevenz_aes() { roundtrip(Format::SevenZ, Some("s3cret")) }
-#[test] fn tar_zst() { roundtrip(Format::TarZst, None) }
+#[test]
+fn zip_plain() {
+    roundtrip(Format::Zip, None)
+}
+#[test]
+fn zip_aes() {
+    roundtrip(Format::Zip, Some("s3cret"))
+}
+#[test]
+fn sevenz_plain() {
+    roundtrip(Format::SevenZ, None)
+}
+#[test]
+fn sevenz_aes() {
+    roundtrip(Format::SevenZ, Some("s3cret"))
+}
+#[test]
+fn tar_zst() {
+    roundtrip(Format::TarZst, None)
+}
 
 #[test]
 fn wrong_and_missing_password() {
@@ -62,14 +101,24 @@ fn wrong_and_missing_password() {
         let t = tempfile::tempdir().unwrap();
         let src = sample(t.path());
         let out = t.path().join(format!("a.{}", format.extension()));
-        let opts = PackOptions { format, password: Some("right".into()), ..Default::default() };
+        let opts = PackOptions {
+            format,
+            password: Some("right".into()),
+            ..Default::default()
+        };
         pack(&[src], &out, &opts, &mut |_| {}, None).unwrap();
-        let bad = ExtractOptions { password: Some("wrong"), ..Default::default() };
+        let bad = ExtractOptions {
+            password: Some("wrong"),
+            ..Default::default()
+        };
         let e = extract(&out, &t.path().join("x"), &bad, &mut |_| {}, None).unwrap_err();
         assert!(matches!(e, Error::WrongPassword), "{format:?}: {e:?}");
         let none = ExtractOptions::default();
         let e = extract(&out, &t.path().join("y"), &none, &mut |_| {}, None).unwrap_err();
-        assert!(matches!(e, Error::PasswordRequired | Error::WrongPassword), "{format:?}: {e:?}");
+        assert!(
+            matches!(e, Error::PasswordRequired | Error::WrongPassword),
+            "{format:?}: {e:?}"
+        );
     }
 }
 
@@ -77,8 +126,21 @@ fn wrong_and_missing_password() {
 fn password_rejected_for_tar() {
     let t = tempfile::tempdir().unwrap();
     let src = sample(t.path());
-    let opts = PackOptions { format: Format::TarZst, password: Some("x".into()), ..Default::default() };
-    assert!(matches!(pack(&[src], &t.path().join("a.tar.zst"), &opts, &mut |_| {}, None), Err(Error::EncryptionNotSupported(_))));
+    let opts = PackOptions {
+        format: Format::TarZst,
+        password: Some("x".into()),
+        ..Default::default()
+    };
+    assert!(matches!(
+        pack(
+            &[src],
+            &t.path().join("a.tar.zst"),
+            &opts,
+            &mut |_| {},
+            None
+        ),
+        Err(Error::EncryptionNotSupported(_))
+    ));
 }
 
 #[test]
@@ -86,19 +148,31 @@ fn split_and_join() {
     let t = tempfile::tempdir().unwrap();
     let src = sample(t.path());
     let out = t.path().join("big.7z");
-    let opts = PackOptions { format: Format::SevenZ, split_size: Some(50_000), ..Default::default() };
+    let opts = PackOptions {
+        format: Format::SevenZ,
+        split_size: Some(50_000),
+        ..Default::default()
+    };
     let rep = pack(&[src.clone()], &out, &opts, &mut |_| {}, None).unwrap();
     assert!(rep.outputs.len() >= 3, "{:?}", rep.outputs);
     assert!(!out.exists());
     let dest = t.path().join("x");
-    extract(&rep.outputs[0], &dest, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    extract(
+        &rep.outputs[0],
+        &dest,
+        &ExtractOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     same_tree(&src, &dest.join("Photos"));
 }
 
 fn evil_zip(path: &Path, names: &[&str], body: &[u8]) {
     let mut z = zip::ZipWriter::new(fs::File::create(path).unwrap());
     for n in names {
-        z.start_file(*n, zip::write::SimpleFileOptions::default()).unwrap();
+        z.start_file(*n, zip::write::SimpleFileOptions::default())
+            .unwrap();
         z.write_all(body).unwrap();
     }
     z.finish().unwrap();
@@ -122,7 +196,11 @@ fn honest_highly_compressible_archive_opens() {
     let t = tempfile::tempdir().unwrap();
     let p = t.path().join("zeros.zip");
     evil_zip(&p, &["a.bin", "b.bin"], &vec![0u8; 8 << 20]);
-    let opts = ExtractOptions { max_ratio: 10, floor: 0, ..Default::default() };
+    let opts = ExtractOptions {
+        max_ratio: 10,
+        floor: 0,
+        ..Default::default()
+    };
     let r = extract(&p, &t.path().join("out"), &opts, &mut |_| {}, None).unwrap();
     assert_eq!(r.bytes, 16 << 20);
 }
@@ -132,10 +210,18 @@ fn hard_cap_stops_runaway_output() {
     let t = tempfile::tempdir().unwrap();
     let p = t.path().join("zeros.zip");
     evil_zip(&p, &["a.bin", "b.bin"], &vec![0u8; 8 << 20]);
-    let opts = ExtractOptions { max_ratio: 10, floor: 0, hard_cap: Some(10 << 20), ..Default::default() };
+    let opts = ExtractOptions {
+        max_ratio: 10,
+        floor: 0,
+        hard_cap: Some(10 << 20),
+        ..Default::default()
+    };
     let e = extract(&p, &t.path().join("out"), &opts, &mut |_| {}, None).unwrap_err();
     assert!(matches!(e, Error::TooLarge { .. }));
-    assert!(!t.path().join("out/b.bin").exists(), "partial file must be removed");
+    assert!(
+        !t.path().join("out/b.bin").exists(),
+        "partial file must be removed"
+    );
 }
 
 #[test]
@@ -147,15 +233,26 @@ fn tiny_and_empty_things() {
         fs::write(root.join("zero.txt"), b"").unwrap();
         fs::write(root.join("one.txt"), b"x").unwrap();
         let out = t.path().join(format!("tiny.{}", format.extension()));
-        let opts = PackOptions { format, ..Default::default() };
+        let opts = PackOptions {
+            format,
+            ..Default::default()
+        };
         let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
         assert_eq!(rep.files, 2, "{format:?}");
         let info = inspect(&out, None).unwrap();
         assert_eq!(info.total_size, 1, "{format:?}");
         let dest = t.path().join("x");
         extract(&out, &dest, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
-        assert_eq!(fs::metadata(dest.join("Tiny/zero.txt")).unwrap().len(), 0, "{format:?}");
-        assert_eq!(fs::read(dest.join("Tiny/one.txt")).unwrap(), b"x", "{format:?}");
+        assert_eq!(
+            fs::metadata(dest.join("Tiny/zero.txt")).unwrap().len(),
+            0,
+            "{format:?}"
+        );
+        assert_eq!(
+            fs::read(dest.join("Tiny/one.txt")).unwrap(),
+            b"x",
+            "{format:?}"
+        );
         assert!(dest.join("Tiny/empty-folder").is_dir(), "{format:?}");
 
         // A single empty file on its own.
@@ -163,7 +260,11 @@ fn tiny_and_empty_things() {
         pack(&[root.join("zero.txt")], &single, &opts, &mut |_| {}, None).unwrap();
         let d2 = t.path().join("y");
         extract(&single, &d2, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
-        assert_eq!(fs::metadata(d2.join("zero.txt")).unwrap().len(), 0, "{format:?}");
+        assert_eq!(
+            fs::metadata(d2.join("zero.txt")).unwrap().len(),
+            0,
+            "{format:?}"
+        );
     }
 }
 
@@ -180,14 +281,20 @@ fn many_small_files() {
     }
     for format in [Format::Zip, Format::SevenZ, Format::TarZst] {
         let out = t.path().join(format!("many.{}", format.extension()));
-        let opts = PackOptions { format, ..Default::default() };
+        let opts = PackOptions {
+            format,
+            ..Default::default()
+        };
         let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
         assert_eq!(rep.files, 5000, "{format:?}");
         assert_eq!(inspect(&out, None).unwrap().file_count, 5000, "{format:?}");
         let dest = t.path().join(format!("x-{}", format.extension()));
         let r = extract(&out, &dest, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
         assert_eq!(r.files, 5000, "{format:?}");
-        assert_eq!(fs::read_to_string(dest.join("Many/d49/f099.txt")).unwrap(), "49-99");
+        assert_eq!(
+            fs::read_to_string(dest.join("Many/d49/f099.txt")).unwrap(),
+            "49-99"
+        );
     }
 }
 
@@ -196,20 +303,40 @@ fn smart_extract_destination() {
     let t = tempfile::tempdir().unwrap();
     let src = sample(t.path());
     let one_folder = t.path().join("one.zip");
-    pack(&[src.clone()], &one_folder, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    pack(
+        &[src.clone()],
+        &one_folder,
+        &PackOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     let info = inspect(&one_folder, None).unwrap();
     // "Photos" already exists next to the archive: unpack its contents into "Photos (2)", flat.
     let target = suggest_dest(&one_folder, &info);
     assert_eq!(target.dest, t.path().join("Photos (2)"));
     assert_eq!(target.strip.as_deref(), Some("Photos/"));
-    let opts = ExtractOptions { strip: target.strip.clone(), ..Default::default() };
+    let opts = ExtractOptions {
+        strip: target.strip.clone(),
+        ..Default::default()
+    };
     extract(&one_folder, &target.dest, &opts, &mut |_| {}, None).unwrap();
-    assert!(t.path().join("Photos (2)/notes.txt").exists(), "no extra Photos level");
+    assert!(
+        t.path().join("Photos (2)/notes.txt").exists(),
+        "no extra Photos level"
+    );
     assert!(!t.path().join("Photos (2)/Photos").exists());
     fs::rename(&src, t.path().join("moved")).unwrap();
     fs::remove_dir_all(t.path().join("Photos (2)")).unwrap();
     let target = suggest_dest(&one_folder, &info);
-    assert_eq!((target.dest.as_path(), target.result.clone(), target.strip.clone()), (t.path(), t.path().join("Photos"), None));
+    assert_eq!(
+        (
+            target.dest.as_path(),
+            target.result.clone(),
+            target.strip.clone()
+        ),
+        (t.path(), t.path().join("Photos"), None)
+    );
 
     let loose = t.path().join("loose.zip");
     evil_zip(&loose, &["a.txt", "b.txt"], b"x");
@@ -224,10 +351,30 @@ fn smart_extract_destination() {
     let r = extract(&loose, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
     assert_eq!((r.files, r.skipped.len()), (0, 2));
     assert_eq!(fs::read(d.join("a.txt")).unwrap(), b"mine");
-    extract(&loose, &d, &ExtractOptions { on_conflict: Conflict::Rename, ..Default::default() }, &mut |_| {}, None).unwrap();
+    extract(
+        &loose,
+        &d,
+        &ExtractOptions {
+            on_conflict: Conflict::Rename,
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     assert_eq!(fs::read(d.join("a (2).txt")).unwrap(), b"x");
     assert_eq!(fs::read(d.join("a.txt")).unwrap(), b"mine");
-    extract(&loose, &d, &ExtractOptions { on_conflict: Conflict::Overwrite, ..Default::default() }, &mut |_| {}, None).unwrap();
+    extract(
+        &loose,
+        &d,
+        &ExtractOptions {
+            on_conflict: Conflict::Overwrite,
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     assert_eq!(fs::read(d.join("a.txt")).unwrap(), b"x");
 }
 
@@ -252,7 +399,11 @@ fn huge_file_over_4gb() {
     }
     for format in [Format::Zip, Format::SevenZ, Format::TarZst] {
         let out = t.path().join(format!("big.{}", format.extension()));
-        let opts = PackOptions { format, level: Level::Fast, ..Default::default() };
+        let opts = PackOptions {
+            format,
+            level: Level::Fast,
+            ..Default::default()
+        };
         let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
         assert_eq!(rep.input_bytes, size);
         let info = inspect(&out, None).unwrap();
@@ -282,10 +433,16 @@ fn flags_and_blocks_executables() {
     evil_zip(&p, &["invoice.pdf.exe", "readme.txt"], b"MZ");
     let info = inspect(&p, None).unwrap();
     assert_eq!(info.executables, vec!["invoice.pdf.exe"]);
-    let opts = ExtractOptions { allow_executables: false, ..Default::default() };
+    let opts = ExtractOptions {
+        allow_executables: false,
+        ..Default::default()
+    };
     let r = extract(&p, &t.path().join("out"), &opts, &mut |_| {}, None).unwrap();
     assert_eq!(r.files, 1);
-    assert_eq!(r.skipped, vec![("invoice.pdf.exe".to_string(), "program blocked".to_string())]);
+    assert_eq!(
+        r.skipped,
+        vec![("invoice.pdf.exe".to_string(), "program blocked".to_string())]
+    );
 }
 
 #[test]
@@ -295,13 +452,29 @@ fn opens_rar() {
     assert_eq!(info.format, Format::Rar);
     assert!(info.file_count > 0);
     let t = tempfile::tempdir().unwrap();
-    let r = extract(&data.join("solid.rar"), t.path(), &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    let r = extract(
+        &data.join("solid.rar"),
+        t.path(),
+        &ExtractOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     assert_eq!(r.files, info.file_count);
 
     let crypted = data.join("crypted.rar");
-    let e = extract(&crypted, &t.path().join("c1"), &ExtractOptions::default(), &mut |_| {}, None);
+    let e = extract(
+        &crypted,
+        &t.path().join("c1"),
+        &ExtractOptions::default(),
+        &mut |_| {},
+        None,
+    );
     assert!(e.is_err());
-    let ok = ExtractOptions { password: Some("unrar"), ..Default::default() };
+    let ok = ExtractOptions {
+        password: Some("unrar"),
+        ..Default::default()
+    };
     let r = extract(&crypted, &t.path().join("c2"), &ok, &mut |_| {}, None).unwrap();
     assert!(r.files > 0);
 }
@@ -315,7 +488,14 @@ fn cancel_leaves_no_partial_archive() {
     fs::write(src.join("a.txt"), "z".repeat(4 << 20)).unwrap();
     let cancel = AtomicBool::new(true);
     let out = t.path().join("c.zip");
-    let e = pack(&[src], &out, &PackOptions::default(), &mut |_| {}, Some(&cancel)).unwrap_err();
+    let e = pack(
+        &[src],
+        &out,
+        &PackOptions::default(),
+        &mut |_| {},
+        Some(&cancel),
+    )
+    .unwrap_err();
     assert!(matches!(e, Error::Cancelled), "{e:?}");
     assert!(!out.exists());
     assert_eq!(fs::read_dir(t.path()).unwrap().count(), 1);
@@ -342,7 +522,12 @@ fn twenty_gb_file() {
     // ".mov" would be stored as-is by Smart Compress; turn it off so the data really compresses.
     for format in [Format::Zip, Format::SevenZ] {
         let out = t.path().join(format!("v.{}", format.extension()));
-        let opts = PackOptions { format, level: Level::Fast, smart: false, ..Default::default() };
+        let opts = PackOptions {
+            format,
+            level: Level::Fast,
+            smart: false,
+            ..Default::default()
+        };
         let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
         assert_eq!(rep.input_bytes, size);
         let info = inspect(&out, None).unwrap();
@@ -354,11 +539,17 @@ fn twenty_gb_file() {
             let mut buf = vec![0u8; 1 << 20];
             loop {
                 let n = r.read(&mut buf).unwrap();
-                if n == 0 { break; }
-                if head.is_empty() { head.extend_from_slice(&buf[..12.min(n)]); }
+                if n == 0 {
+                    break;
+                }
+                if head.is_empty() {
+                    head.extend_from_slice(&buf[..12.min(n)]);
+                }
                 seen += n as u64;
                 tail.extend_from_slice(&buf[..n]);
-                if tail.len() > 64 { tail.drain(..tail.len() - 64); }
+                if tail.len() > 64 {
+                    tail.drain(..tail.len() - 64);
+                }
             }
         };
         match format {
@@ -369,8 +560,16 @@ fn twenty_gb_file() {
                 consume(&mut f); // the zip crate checks the CRC when the entry ends
             }
             _ => {
-                let mut r = sevenz_rust2::ArchiveReader::open(&out, sevenz_rust2::Password::empty()).unwrap();
-                r.for_each_entries(|e, rd| { if !e.is_directory { consume(rd); } Ok(true) }).unwrap();
+                let mut r =
+                    sevenz_rust2::ArchiveReader::open(&out, sevenz_rust2::Password::empty())
+                        .unwrap();
+                r.for_each_entries(|e, rd| {
+                    if !e.is_directory {
+                        consume(rd);
+                    }
+                    Ok(true)
+                })
+                .unwrap();
             }
         }
         assert_eq!(seen, size, "{format:?}");

@@ -40,18 +40,26 @@ struct Record {
 }
 
 fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn new_id(len: usize) -> String {
     use rand::Rng;
     const A: &[u8] = b"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut r = rand::thread_rng();
-    (0..len).map(|_| A[r.gen_range(0..A.len())] as char).collect()
+    (0..len)
+        .map(|_| A[r.gen_range(0..A.len())] as char)
+        .collect()
 }
 
 fn sha(s: &str) -> String {
-    Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(s.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn valid_id(id: &str) -> bool {
@@ -88,8 +96,15 @@ fn err(code: StatusCode, msg: &str) -> Response {
 }
 
 async fn create(State(st): State<AppState>, headers: HeaderMap, body: Body) -> Response {
-    let hdr = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
-    let hours = hdr("x-expires-hours").unwrap_or(24).clamp(1, st.cfg.max_hours as u64);
+    let hdr = |k: &str| {
+        headers
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+    };
+    let hours = hdr("x-expires-hours")
+        .unwrap_or(24)
+        .clamp(1, st.cfg.max_hours as u64);
     let max_downloads = hdr("x-max-downloads").map(|m| m.clamp(1, 10_000) as u32);
     if let Some(len) = hdr("content-length") {
         if len > st.cfg.max_bytes {
@@ -123,7 +138,14 @@ async fn create(State(st): State<AppState>, headers: HeaderMap, body: Body) -> R
     }
     let _ = file.flush().await;
     drop(file);
-    let rec = Record { size, created: now(), expires_at: now() + hours * 3600, max_downloads, downloads: 0, delete_token_sha256: sha(&token) };
+    let rec = Record {
+        size,
+        created: now(),
+        expires_at: now() + hours * 3600,
+        max_downloads,
+        downloads: 0,
+        delete_token_sha256: sha(&token),
+    };
     if tokio::fs::rename(&tmp, st.blob(&id)).await.is_err() || st.save(&id, &rec).await.is_err() {
         st.remove(&id).await;
         return err(StatusCode::INTERNAL_SERVER_ERROR, "storage unavailable");
@@ -145,7 +167,9 @@ async fn meta(State(st): State<AppState>, Path(id): Path<String>) -> Response {
 async fn blob(State(st): State<AppState>, Path(id): Path<String>) -> Response {
     let rec = {
         let _g = st.lock.lock().await;
-        let Some(mut r) = st.load(&id).await else { return err(StatusCode::NOT_FOUND, "gone") };
+        let Some(mut r) = st.load(&id).await else {
+            return err(StatusCode::NOT_FOUND, "gone");
+        };
         if !AppState::alive(&r) {
             return err(StatusCode::GONE, "gone");
         }
@@ -155,7 +179,9 @@ async fn blob(State(st): State<AppState>, Path(id): Path<String>) -> Response {
         }
         r
     };
-    let Ok(file) = tokio::fs::File::open(st.blob(&id)).await else { return err(StatusCode::NOT_FOUND, "gone") };
+    let Ok(file) = tokio::fs::File::open(st.blob(&id)).await else {
+        return err(StatusCode::NOT_FOUND, "gone");
+    };
     let stream = tokio_util::io::ReaderStream::with_capacity(file, 1 << 16);
     Response::builder()
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -168,21 +194,40 @@ async fn blob(State(st): State<AppState>, Path(id): Path<String>) -> Response {
 /// The first bytes of a share (header + encrypted name), so clients can check the password
 /// before downloading. Does not count as a download.
 async fn head(State(st): State<AppState>, Path(id): Path<String>) -> Response {
-    let Some(r) = st.load(&id).await else { return err(StatusCode::NOT_FOUND, "gone") };
+    let Some(r) = st.load(&id).await else {
+        return err(StatusCode::NOT_FOUND, "gone");
+    };
     if !AppState::alive(&r) {
         return err(StatusCode::GONE, "gone");
     }
-    let Ok(f) = tokio::fs::File::open(st.blob(&id)).await else { return err(StatusCode::NOT_FOUND, "gone") };
+    let Ok(f) = tokio::fs::File::open(st.blob(&id)).await else {
+        return err(StatusCode::NOT_FOUND, "gone");
+    };
     let mut buf = Vec::new();
     use tokio::io::AsyncReadExt;
-    if f.take(45 + 65_536 + 16).read_to_end(&mut buf).await.is_err() {
+    if f.take(45 + 65_536 + 16)
+        .read_to_end(&mut buf)
+        .await
+        .is_err()
+    {
         return err(StatusCode::INTERNAL_SERVER_ERROR, "storage unavailable");
     }
-    Response::builder().header(header::CONTENT_TYPE, "application/octet-stream").header(header::CACHE_CONTROL, "no-store").body(Body::from(buf)).unwrap()
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(buf))
+        .unwrap()
 }
 
-async fn delete(State(st): State<AppState>, Path(id): Path<String>, headers: HeaderMap) -> Response {
-    let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok()).unwrap_or("");
+async fn delete(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let token = headers
+        .get("x-delete-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     match st.load(&id).await {
         Some(r) if r.delete_token_sha256 == sha(token) => {
             st.remove(&id).await;
@@ -213,7 +258,9 @@ async fn home() -> &'static str {
 /// Delete expired and used-up shares.
 pub async fn sweep(st: &AppState) -> usize {
     let mut n = 0;
-    let Ok(mut rd) = tokio::fs::read_dir(&st.cfg.dir).await else { return 0 };
+    let Ok(mut rd) = tokio::fs::read_dir(&st.cfg.dir).await else {
+        return 0;
+    };
     while let Ok(Some(e)) = rd.next_entry().await {
         let name = e.file_name().to_string_lossy().into_owned();
         if let Some(id) = name.strip_suffix(".json") {
@@ -231,7 +278,10 @@ pub async fn sweep(st: &AppState) -> usize {
 }
 
 pub fn app(cfg: Config) -> (Router, AppState) {
-    let st = AppState { cfg: Arc::new(cfg), lock: Arc::new(Mutex::new(())) };
+    let st = AppState {
+        cfg: Arc::new(cfg),
+        lock: Arc::new(Mutex::new(())),
+    };
     let r = Router::new()
         .route("/", get(home))
         .route("/api/shares", post(create))

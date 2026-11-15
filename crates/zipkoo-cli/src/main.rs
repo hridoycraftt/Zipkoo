@@ -3,20 +3,36 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zipkoo_core::{extract, inspect, pack, peek, ExtractOptions, Format, Level, PackOptions, Progress};
+use zipkoo_core::{
+    extract, inspect, pack, peek, ExtractOptions, Format, Level, PackOptions, Progress,
+};
 
 #[derive(Parser)]
-#[command(name = "zipkoo", version, about = "Zip it. Ship it. Friendly archives from the command line.")]
+#[command(
+    name = "zipkoo",
+    version,
+    about = "Zip it. Ship it. Friendly archives from the command line."
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
-enum Fmt { Zip, #[value(name = "7z")] SevenZ, #[value(name = "tar.zst")] TarZst }
+enum Fmt {
+    Zip,
+    #[value(name = "7z")]
+    SevenZ,
+    #[value(name = "tar.zst")]
+    TarZst,
+}
 
 #[derive(Copy, Clone, ValueEnum)]
-enum Lvl { Fast, Normal, Max }
+enum Lvl {
+    Fast,
+    Normal,
+    Max,
+}
 
 #[derive(Subcommand)]
 enum Cmd {
@@ -184,7 +200,11 @@ fn human(n: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{n} B") } else { format!("{v:.1} {}", units[i]) }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", units[i])
+    }
 }
 
 fn bar() -> impl FnMut(&Progress) {
@@ -195,8 +215,20 @@ fn bar() -> impl FnMut(&Progress) {
         }
         let pct = (p.done_bytes as f64 / p.total_bytes as f64 * 100.0).min(100.0);
         let filled = (pct / 5.0) as usize;
-        let name: String = p.current.chars().rev().take(40).collect::<String>().chars().rev().collect();
-        eprint!("\r\x1b[2K[{}{}] {pct:>5.1}%  {name}", "█".repeat(filled), "░".repeat(20 - filled));
+        let name: String = p
+            .current
+            .chars()
+            .rev()
+            .take(40)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        eprint!(
+            "\r\x1b[2K[{}{}] {pct:>5.1}%  {name}",
+            "█".repeat(filled),
+            "░".repeat(20 - filled)
+        );
         let _ = std::io::stderr().flush();
     }
 }
@@ -217,72 +249,161 @@ fn rpassword_like(prompt: &str) -> Result<String, String> {
     eprint!("{prompt}");
     let _ = std::io::stderr().flush();
     let mut s = String::new();
-    std::io::stdin().read_line(&mut s).map_err(|e| e.to_string())?;
+    std::io::stdin()
+        .read_line(&mut s)
+        .map_err(|e| e.to_string())?;
     Ok(s.trim_end_matches(['\r', '\n']).to_string())
 }
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Pack { inputs, out, format, level, lock, hide_names, no_smart, split } => {
+        Cmd::Pack {
+            inputs,
+            out,
+            format,
+            level,
+            lock,
+            hide_names,
+            no_smart,
+            split,
+        } => {
             if inputs.is_empty() {
                 return Err("Add at least one file or folder to pack.".into());
             }
-            let format = match format { Fmt::Zip => Format::Zip, Fmt::SevenZ => Format::SevenZ, Fmt::TarZst => Format::TarZst };
-            let level = match level { Lvl::Fast => Level::Fast, Lvl::Normal => Level::Normal, Lvl::Max => Level::Max };
+            let format = match format {
+                Fmt::Zip => Format::Zip,
+                Fmt::SevenZ => Format::SevenZ,
+                Fmt::TarZst => Format::TarZst,
+            };
+            let level = match level {
+                Lvl::Fast => Level::Fast,
+                Lvl::Normal => Level::Normal,
+                Lvl::Max => Level::Max,
+            };
             let split_size = match split {
-                Some(s) => Some(parse_size(&s).ok_or(format!("Can't read the split size \"{s}\". Try 700M or 2G."))?),
+                Some(s) => Some(parse_size(&s).ok_or(format!(
+                    "Can't read the split size \"{s}\". Try 700M or 2G."
+                ))?),
                 None => None,
             };
             let out = out.unwrap_or_else(|| {
-                let stem = inputs[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "archive".into());
+                let stem = inputs[0]
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "archive".into());
                 zipkoo_core::unique_path(&PathBuf::from(format!("{stem}.{}", format.extension())))
             });
-            let password = if lock { Some(ask_password(true)?) } else { None };
-            let opts = PackOptions { format, level, smart: !no_smart, password, hide_names, split_size, ..Default::default() };
+            let password = if lock {
+                Some(ask_password(true)?)
+            } else {
+                None
+            };
+            let opts = PackOptions {
+                format,
+                level,
+                smart: !no_smart,
+                password,
+                hide_names,
+                split_size,
+                ..Default::default()
+            };
             let start = std::time::Instant::now();
             let r = pack(&inputs, &out, &opts, &mut bar(), None).map_err(|e| e.to_string())?;
             eprintln!();
             let saved = 100.0 - (r.output_bytes as f64 / r.input_bytes.max(1) as f64 * 100.0);
-            println!("✓ {} files · {} → {} (saved {:.0}%) · {:.1}s", r.files, human(r.input_bytes), human(r.output_bytes), saved.max(0.0), start.elapsed().as_secs_f64());
+            println!(
+                "✓ {} files · {} → {} (saved {:.0}%) · {:.1}s",
+                r.files,
+                human(r.input_bytes),
+                human(r.output_bytes),
+                saved.max(0.0),
+                start.elapsed().as_secs_f64()
+            );
             if r.stored_as_is > 0 {
-                println!("  {} already-compressed files stored as they are", r.stored_as_is);
+                println!(
+                    "  {} already-compressed files stored as they are",
+                    r.stored_as_is
+                );
             }
             for o in r.outputs {
                 println!("  {}", o.display());
             }
         }
-        Cmd::Open { archive, to, overwrite, no_programs, password } => {
+        Cmd::Open {
+            archive,
+            to,
+            overwrite,
+            no_programs,
+            password,
+        } => {
             let info = inspect(&archive, password.as_deref()).map_err(|e| e.to_string())?;
             let password = match password {
                 None if info.encrypted => Some(ask_password(false)?),
                 p => p,
             };
             if !info.executables.is_empty() && !no_programs {
-                eprintln!("⚠ {} program(s) inside. Open them only if you trust the sender.", info.executables.len());
+                eprintln!(
+                    "⚠ {} program(s) inside. Open them only if you trust the sender.",
+                    info.executables.len()
+                );
             }
             let dest = to.unwrap_or_else(|| {
-                let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = archive
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 let name = zipkoo_core::split::strip_part_suffix(&name).to_string();
-                let stem = name.trim_end_matches(&format!(".{}", info.format.extension())).to_string();
+                let stem = name
+                    .trim_end_matches(&format!(".{}", info.format.extension()))
+                    .to_string();
                 archive.with_file_name(stem)
             });
-            let opts = ExtractOptions { password: password.as_deref(), overwrite, allow_executables: !no_programs, ..Default::default() };
+            let opts = ExtractOptions {
+                password: password.as_deref(),
+                overwrite,
+                allow_executables: !no_programs,
+                ..Default::default()
+            };
             let r = extract(&archive, &dest, &opts, &mut bar(), None).map_err(|e| e.to_string())?;
             eprintln!();
-            println!("✓ {} files · {} → {}", r.files, human(r.bytes), r.dest.display());
+            println!(
+                "✓ {} files · {} → {}",
+                r.files,
+                human(r.bytes),
+                r.dest.display()
+            );
             for (name, why) in r.skipped {
                 println!("  skipped {name} ({why})");
             }
         }
-        Cmd::Peek { archive, file, password } => match file {
+        Cmd::Peek {
+            archive,
+            file,
+            password,
+        } => match file {
             Some(name) => {
-                let data = peek(&archive, &name, password.as_deref(), 256 << 20).map_err(|e| e.to_string())?;
-                std::io::stdout().write_all(&data).map_err(|e| e.to_string())?;
+                let data = peek(&archive, &name, password.as_deref(), 256 << 20)
+                    .map_err(|e| e.to_string())?;
+                std::io::stdout()
+                    .write_all(&data)
+                    .map_err(|e| e.to_string())?;
             }
             None => {
                 let i = inspect(&archive, password.as_deref()).map_err(|e| e.to_string())?;
-                println!("{} · {} · {} files · {} packed into {}{}", archive.display(), i.format.label(), i.file_count, human(i.total_size), human(i.archive_size), if i.encrypted { " · 🔒 encrypted" } else { "" });
+                println!(
+                    "{} · {} · {} files · {} packed into {}{}",
+                    archive.display(),
+                    i.format.label(),
+                    i.file_count,
+                    human(i.total_size),
+                    human(i.archive_size),
+                    if i.encrypted {
+                        " · 🔒 encrypted"
+                    } else {
+                        ""
+                    }
+                );
                 for e in &i.entries {
                     let flag = if e.executable { " ⚠ program" } else { "" };
                     if e.is_dir {
@@ -293,41 +414,111 @@ fn run() -> Result<(), String> {
                 }
             }
         },
-        Cmd::Sfx { inputs, out, lock, stub } => {
+        Cmd::Sfx {
+            inputs,
+            out,
+            lock,
+            stub,
+        } => {
             if inputs.is_empty() {
                 return Err("Add at least one file or folder.".into());
             }
-            let name = if cfg!(windows) { "zipkoo-sfx.exe" } else { "zipkoo-sfx" };
+            let name = if cfg!(windows) {
+                "zipkoo-sfx.exe"
+            } else {
+                "zipkoo-sfx"
+            };
             let stub = stub
                 .or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join(name))))
                 .filter(|p| p.is_file())
                 .ok_or("Can't find the zipkoo-sfx stub. Build it with `cargo build -p zipkoo-sfx` or pass --stub.")?;
             let out = out.unwrap_or_else(|| {
-                let stem = inputs[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Archive".into());
-                zipkoo_core::unique_path(&PathBuf::from(if cfg!(windows) { format!("{stem}.exe") } else { format!("{stem}.run") }))
+                let stem = inputs[0]
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Archive".into());
+                zipkoo_core::unique_path(&PathBuf::from(if cfg!(windows) {
+                    format!("{stem}.exe")
+                } else {
+                    format!("{stem}.run")
+                }))
             });
-            let password = if lock { Some(ask_password(true)?) } else { None };
-            let opts = PackOptions { password, ..Default::default() };
-            let r = zipkoo_core::sfx::build(&stub, &inputs, &out, &opts, &mut bar(), None).map_err(|e| e.to_string())?;
+            let password = if lock {
+                Some(ask_password(true)?)
+            } else {
+                None
+            };
+            let opts = PackOptions {
+                password,
+                ..Default::default()
+            };
+            let r = zipkoo_core::sfx::build(&stub, &inputs, &out, &opts, &mut bar(), None)
+                .map_err(|e| e.to_string())?;
             eprintln!();
-            println!("✓ {} files · {} → {} ({})", r.files, human(r.input_bytes), out.display(), human(r.output_bytes));
+            println!(
+                "✓ {} files · {} → {} ({})",
+                r.files,
+                human(r.input_bytes),
+                out.display(),
+                human(r.output_bytes)
+            );
         }
-        Cmd::Share { file, server, hours, downloads, lock } => {
-            let pw = if lock { Some(ask_password(true)?) } else { None };
-            let opts = zipkoo_core::share::ShareOptions { server: &server, expires_hours: hours, max_downloads: downloads, password: pw.as_deref() };
-            let s = zipkoo_core::share::upload(&file, &opts, &mut |_| {}).map_err(|e| e.to_string())?;
+        Cmd::Share {
+            file,
+            server,
+            hours,
+            downloads,
+            lock,
+        } => {
+            let pw = if lock {
+                Some(ask_password(true)?)
+            } else {
+                None
+            };
+            let opts = zipkoo_core::share::ShareOptions {
+                server: &server,
+                expires_hours: hours,
+                max_downloads: downloads,
+                password: pw.as_deref(),
+            };
+            let s =
+                zipkoo_core::share::upload(&file, &opts, &mut |_| {}).map_err(|e| e.to_string())?;
             println!("{}", s.url);
-            eprintln!("Delete token (keep it to remove the link early): {}", s.delete_token);
+            eprintln!(
+                "Delete token (keep it to remove the link early): {}",
+                s.delete_token
+            );
         }
         Cmd::Get { link, to, password } => {
-            let p = zipkoo_core::share::download(&link, &to, password.as_deref(), &mut |_| {}).map_err(|e| e.to_string())?;
+            let p = zipkoo_core::share::download(&link, &to, password.as_deref(), &mut |_| {})
+                .map_err(|e| e.to_string())?;
             println!("✓ {}", p.display());
         }
-        Cmd::Update { archive, inputs, remove_missing, no_history, password } => {
-            let opts = zipkoo_core::update::UpdateOptions { password: password.as_deref(), keep_history: !no_history, remove_missing, smart: true };
-            let r = zipkoo_core::update::update(&archive, &inputs, &opts, &mut bar(), None).map_err(|e| e.to_string())?;
+        Cmd::Update {
+            archive,
+            inputs,
+            remove_missing,
+            no_history,
+            password,
+        } => {
+            let opts = zipkoo_core::update::UpdateOptions {
+                password: password.as_deref(),
+                keep_history: !no_history,
+                remove_missing,
+                smart: true,
+            };
+            let r = zipkoo_core::update::update(&archive, &inputs, &opts, &mut bar(), None)
+                .map_err(|e| e.to_string())?;
             eprintln!();
-            println!("✓ version {} · {} added · {} changed · {} removed · {} unchanged · packed {}", r.version, r.added, r.changed, r.removed, r.unchanged, human(r.bytes_packed));
+            println!(
+                "✓ version {} · {} added · {} changed · {} removed · {} unchanged · packed {}",
+                r.version,
+                r.added,
+                r.changed,
+                r.removed,
+                r.unchanged,
+                human(r.bytes_packed)
+            );
         }
         Cmd::History { archive } => {
             let m = zipkoo_core::update::read_manifest(&archive).map_err(|e| e.to_string())?;
@@ -335,50 +526,118 @@ fn run() -> Result<(), String> {
                 println!("No history yet. Run `zipkoo update` to start one.");
             }
             for v in m.versions {
-                println!("v{}  {}  +{} ~{} -{}", v.version, v.time, v.added.len(), v.changed.len(), v.removed.len());
+                println!(
+                    "v{}  {}  +{} ~{} -{}",
+                    v.version,
+                    v.time,
+                    v.added.len(),
+                    v.changed.len(),
+                    v.removed.len()
+                );
             }
         }
-        Cmd::Heal { archive, create, repair } => {
+        Cmd::Heal {
+            archive,
+            create,
+            repair,
+        } => {
             if let Some(p) = create {
-                let r = zipkoo_core::heal::create(&archive, p, &mut bar(), None).map_err(|e| e.to_string())?;
+                let r = zipkoo_core::heal::create(&archive, p, &mut bar(), None)
+                    .map_err(|e| e.to_string())?;
                 eprintln!();
                 println!("✓ repair data {} ({})", r.path.display(), human(r.size));
             } else {
-                let h = zipkoo_core::heal::check(&archive, repair, &mut bar(), None).map_err(|e| e.to_string())?;
+                let h = zipkoo_core::heal::check(&archive, repair, &mut bar(), None)
+                    .map_err(|e| e.to_string())?;
                 eprintln!();
                 if h.healthy() {
                     println!("✓ Healthy · {} blocks checked", h.blocks);
                 } else if repair && h.repairable() {
                     println!("✓ Repaired {} damaged blocks", h.repaired);
                 } else if h.repairable() {
-                    println!("⚠ {} damaged blocks. Run with --repair to fix them.", h.damaged);
+                    println!(
+                        "⚠ {} damaged blocks. Run with --repair to fix them.",
+                        h.damaged
+                    );
                 } else {
-                    return Err(format!("{} damaged blocks; {} are beyond the repair data.", h.damaged, h.unrecoverable));
+                    return Err(format!(
+                        "{} damaged blocks; {} are beyond the repair data.",
+                        h.damaged, h.unrecoverable
+                    ));
                 }
             }
         }
-        Cmd::Convert { archives, format, password } => {
-            let format = match format { Fmt::Zip => Format::Zip, Fmt::SevenZ => Format::SevenZ, Fmt::TarZst => Format::TarZst };
+        Cmd::Convert {
+            archives,
+            format,
+            password,
+        } => {
+            let format = match format {
+                Fmt::Zip => Format::Zip,
+                Fmt::SevenZ => Format::SevenZ,
+                Fmt::TarZst => Format::TarZst,
+            };
             for a in archives {
                 let out = zipkoo_core::convert::converted_path(&a, format);
-                let opts = zipkoo_core::convert::ConvertOptions { password: password.as_deref(), pack: PackOptions { format, ..Default::default() } };
+                let opts = zipkoo_core::convert::ConvertOptions {
+                    password: password.as_deref(),
+                    pack: PackOptions {
+                        format,
+                        ..Default::default()
+                    },
+                };
                 match zipkoo_core::convert::convert(&a, &out, &opts, &mut bar(), None) {
-                    Ok(r) => { eprintln!(); println!("✓ {} → {} ({})", a.display(), out.display(), human(r.output_bytes)); }
-                    Err(e) => { eprintln!(); println!("✗ {}: {e}", a.display()); }
+                    Ok(r) => {
+                        eprintln!();
+                        println!(
+                            "✓ {} → {} ({})",
+                            a.display(),
+                            out.display(),
+                            human(r.output_bytes)
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!();
+                        println!("✗ {}: {e}", a.display());
+                    }
                 }
             }
         }
-        Cmd::Backup { folder, dest, keep, repair } => {
-            let opts = zipkoo_core::backup::BackupOptions { keep, recovery_percent: repair, ..Default::default() };
-            match zipkoo_core::backup::snapshot(&folder, &dest, &opts, &mut bar(), None).map_err(|e| e.to_string())? {
-                Some(s) => { eprintln!(); println!("✓ {} ({} files){}", s.path.display(), s.report.files, if s.pruned.is_empty() { String::new() } else { format!(" · removed {} old", s.pruned.len()) }); }
+        Cmd::Backup {
+            folder,
+            dest,
+            keep,
+            repair,
+        } => {
+            let opts = zipkoo_core::backup::BackupOptions {
+                keep,
+                recovery_percent: repair,
+                ..Default::default()
+            };
+            match zipkoo_core::backup::snapshot(&folder, &dest, &opts, &mut bar(), None)
+                .map_err(|e| e.to_string())?
+            {
+                Some(s) => {
+                    eprintln!();
+                    println!(
+                        "✓ {} ({} files){}",
+                        s.path.display(),
+                        s.report.files,
+                        if s.pruned.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · removed {} old", s.pruned.len())
+                        }
+                    );
+                }
                 None => println!("Nothing changed since the last snapshot."),
             }
         }
         Cmd::Search { query, r#in } => {
             let db = std::env::temp_dir().join("zipkoo-cli-index.db");
             let mut ix = zipkoo_core::index::Index::open(&db).map_err(|e| e.to_string())?;
-            ix.refresh(&zipkoo_core::index::find_archives(&r#in, 12)).map_err(|e| e.to_string())?;
+            ix.refresh(&zipkoo_core::index::find_archives(&r#in, 12))
+                .map_err(|e| e.to_string())?;
             for h in ix.search(&query, 200).map_err(|e| e.to_string())? {
                 println!("{:>10}  {}  ⟵  {}", human(h.size), h.name, h.archive);
             }
@@ -388,16 +647,39 @@ fn run() -> Result<(), String> {
             let wasted: u64 = g.iter().map(|g| g.wasted).sum();
             for grp in &g {
                 println!("{} × {}", grp.files.len(), human(grp.size));
-                for f in &grp.files { println!("    {}", f.display()); }
+                for f in &grp.files {
+                    println!("    {}", f.display());
+                }
             }
             println!("{} groups · {} could be saved", g.len(), human(wasted));
         }
-        Cmd::Shrink { inputs, out, max_edge, quality } => {
-            let r = zipkoo_core::optimize::optimize(&inputs, &out, &zipkoo_core::optimize::OptimizeOptions { max_edge, quality }).map_err(|e| e.to_string())?;
-            println!("✓ {} photos ({} smaller) · {} → {} · {}", r.images, r.shrunk, human(r.before), human(r.after), out.display());
+        Cmd::Shrink {
+            inputs,
+            out,
+            max_edge,
+            quality,
+        } => {
+            let r = zipkoo_core::optimize::optimize(
+                &inputs,
+                &out,
+                &zipkoo_core::optimize::OptimizeOptions { max_edge, quality },
+            )
+            .map_err(|e| e.to_string())?;
+            println!(
+                "✓ {} photos ({} smaller) · {} → {} · {}",
+                r.images,
+                r.shrunk,
+                human(r.before),
+                human(r.after),
+                out.display()
+            );
         }
         Cmd::Hash { file } => {
-            println!("{}  {}", zipkoo_core::hash::sha256_file(&file).map_err(|e| e.to_string())?, file.display());
+            println!(
+                "{}  {}",
+                zipkoo_core::hash::sha256_file(&file).map_err(|e| e.to_string())?,
+                file.display()
+            );
         }
     }
     Ok(())

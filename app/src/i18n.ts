@@ -2,6 +2,22 @@
 export type Lang = "en" | "bn";
 
 const en = {
+  scanLabel: "Scan extracted files for viruses",
+  scanHint: "Uses {engine}, already on your computer.",
+  scanNone: "No virus scanner found. Windows has Microsoft Defender built in; on Mac or Linux you can install ClamAV.",
+  scanning: "Scanning for viruses…",
+  scanClean: "{engine} found no threats.",
+  scanThreats: "{engine} found {n} threat(s). Don't open these files.",
+  scanBtn: "Scan for viruses",
+  rememberPw: "Remember this password",
+  rememberPwHint: "Saved in your system keychain. Zipkoo tries saved passwords on locked archives.",
+  secPasswords: "Saved passwords",
+  noSavedPw: "No saved passwords. Tick “Remember this password” when you open a locked archive, or add one here.",
+  addPw: "Add password",
+  pwLabel: "Label",
+  pwLabelPlaceholder: "e.g. Client files",
+  savedOn: "Saved {when}",
+  pwSaved: "Password saved to your keychain.",
   navSettings: "Settings",
   settingsTitle: "Settings",
   secLook: "Look",
@@ -41,6 +57,12 @@ const en = {
   replaceAll: "Replace",
   testArchive: "Test archive",
   testing: "Testing…",
+  salvageBtn: "Recover files",
+  salvaging: "Recovering files…",
+  salvageDone: "Recovered {n} file(s) into {name}.",
+  salvageLost: "{n} file(s) were too damaged to recover.",
+  salvageOffer: "This ZIP is broken. Zipkoo can try to recover the files that are still readable.",
+  salvageHint: "Recovers the readable files into a new ZIP, even without repair data. The original is not changed.",
   testOk: "All {n} files passed their checksum. The archive is fine.",
   testBad: "{n} problem(s) found: {list}",
   rootLabel: "Top",
@@ -283,6 +305,22 @@ const en = {
 type Dict = typeof en;
 
 const bn: Dict = {
+  scanLabel: "এক্সট্র্যাক্ট করা ফাইল ভাইরাস স্ক্যান করুন",
+  scanHint: "আপনার কম্পিউটারের {engine} ব্যবহার করে।",
+  scanNone: "কোনো ভাইরাস স্ক্যানার পাওয়া যায়নি। Windows-এ Microsoft Defender থাকে; Mac বা Linux-এ ClamAV ইনস্টল করতে পারেন।",
+  scanning: "ভাইরাস স্ক্যান হচ্ছে…",
+  scanClean: "{engine} কোনো ঝুঁকি পায়নি।",
+  scanThreats: "{engine} {n}টা ঝুঁকি পেয়েছে। এই ফাইলগুলো খুলবেন না।",
+  scanBtn: "ভাইরাস স্ক্যান",
+  rememberPw: "এই পাসওয়ার্ড মনে রাখুন",
+  rememberPwHint: "আপনার সিস্টেমের কিচেইনে সেভ থাকবে। লক করা আর্কাইভ খুললে Zipkoo সেভ করা পাসওয়ার্ডগুলো চেষ্টা করবে।",
+  secPasswords: "সেভ করা পাসওয়ার্ড",
+  noSavedPw: "কোনো পাসওয়ার্ড সেভ নেই। লক করা আর্কাইভ খোলার সময় “এই পাসওয়ার্ড মনে রাখুন” টিক দিন, অথবা এখানে যোগ করুন।",
+  addPw: "পাসওয়ার্ড যোগ করুন",
+  pwLabel: "নাম",
+  pwLabelPlaceholder: "যেমন ক্লায়েন্টের ফাইল",
+  savedOn: "সেভ করা {when}",
+  pwSaved: "পাসওয়ার্ড কিচেইনে সেভ হয়েছে।",
   navSettings: "সেটিংস",
   settingsTitle: "সেটিংস",
   secLook: "চেহারা",
@@ -322,6 +360,12 @@ const bn: Dict = {
   replaceAll: "বদলে দিন",
   testArchive: "আর্কাইভ টেস্ট",
   testing: "টেস্ট হচ্ছে…",
+  salvageBtn: "ফাইল উদ্ধার করুন",
+  salvaging: "ফাইল উদ্ধার হচ্ছে…",
+  salvageDone: "{n}টা ফাইল উদ্ধার করে {name}-এ রাখা হয়েছে।",
+  salvageLost: "{n}টা ফাইল এতটাই নষ্ট যে উদ্ধার করা যায়নি।",
+  salvageOffer: "এই ZIP টা নষ্ট। যেসব ফাইল এখনও পড়া যায়, Zipkoo সেগুলো উদ্ধারের চেষ্টা করতে পারে।",
+  salvageHint: "রিপেয়ার ডেটা ছাড়াই, পড়া যায় এমন ফাইলগুলো নতুন একটা ZIP-এ উদ্ধার করে। আসল ফাইল বদলায় না।",
   testOk: "{n}টা ফাইলেরই চেকসাম মিলেছে। আর্কাইভ ঠিক আছে।",
   testBad: "{n}টা সমস্যা পাওয়া গেছে: {list}",
   rootLabel: "শুরু",
@@ -558,7 +602,18 @@ const bn: Dict = {
 export const dicts: Record<Lang, Dict> = { en, bn };
 export type Key = keyof Dict;
 
+/** English counts: "1 file", "2 files" (strings write "file(s)" or plain plurals). */
+function plural(s: string): string {
+  return s
+    .replace(/(^|[^\d.,])1 (\w+)\(s\)/g, "$11 $2")
+    .replace(/(\d) (\w+)\(s\)/g, "$1 $2s")
+    .replace(/(^|[^\d.,])1 (file|item|archive|problem|threat|folder)s\b/g, "$11 $2")
+    .replace(/(^|[^\d.,])1 (\w+) (are|were)\b/g, (_m, a, w, v) => `${a}1 ${w} ${v === "are" ? "is" : "was"}`);
+}
+
 export function makeT(lang: Lang) {
-  return (key: Key, vars: Record<string, string | number> = {}) =>
-    dicts[lang][key].replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
+  return (key: Key, vars: Record<string, string | number> = {}) => {
+    const out = dicts[lang][key].replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
+    return lang === "en" ? plural(out) : out;
+  };
 }

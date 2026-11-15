@@ -18,7 +18,10 @@ pub struct OptimizeOptions {
 
 impl Default for OptimizeOptions {
     fn default() -> Self {
-        Self { max_edge: 2560, quality: 82 }
+        Self {
+            max_edge: 2560,
+            quality: 82,
+        }
     }
 }
 
@@ -43,12 +46,24 @@ fn kind(p: &Path) -> Option<&'static str> {
 
 fn shrink(src: &Path, dst: &Path, k: &str, o: &OptimizeOptions) -> image::ImageResult<()> {
     use image::ImageDecoder;
-    let mut decoder = ImageReader::open(src)?.with_guessed_format()?.into_decoder()?;
+    let mut decoder = ImageReader::open(src)?
+        .with_guessed_format()?
+        .into_decoder()?;
     // Phones store rotation as an EXIF flag; apply it so shrunk photos aren't sideways.
-    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
     let mut img = DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);
-    let img = if img.width().max(img.height()) > o.max_edge { img.resize(o.max_edge, o.max_edge, image::imageops::FilterType::Lanczos3) } else { img };
+    let img = if img.width().max(img.height()) > o.max_edge {
+        img.resize(
+            o.max_edge,
+            o.max_edge,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        img
+    };
     match k {
         "png" => img.save_with_format(dst, image::ImageFormat::Png),
         // JPEG and WebP photos become JPEG (the bundled WebP encoder is lossless only).
@@ -63,10 +78,17 @@ fn shrink(src: &Path, dst: &Path, k: &str, o: &OptimizeOptions) -> image::ImageR
 /// Optimize every photo under `inputs` into `out_dir`, keeping the folder structure.
 /// Non-image files are copied so `out_dir` is a complete, ready-to-pack copy.
 pub fn optimize(inputs: &[PathBuf], out_dir: &Path, o: &OptimizeOptions) -> Result<OptimizeReport> {
-    let mut r = OptimizeReport { out_dir: out_dir.to_path_buf(), ..Default::default() };
+    let mut r = OptimizeReport {
+        out_dir: out_dir.to_path_buf(),
+        ..Default::default()
+    };
     for input in inputs {
         let base = input.parent().unwrap_or(Path::new("")).to_path_buf();
-        for e in walkdir::WalkDir::new(input).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+        for e in walkdir::WalkDir::new(input)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let rel = e.path().strip_prefix(&base).unwrap_or(e.path());
             let dst = out_dir.join(rel);
             if e.file_type().is_dir() {
@@ -88,7 +110,11 @@ pub fn optimize(inputs: &[PathBuf], out_dir: &Path, o: &OptimizeOptions) -> Resu
                 continue;
             };
             r.images += 1;
-            let dst = if k == "webp" { crate::pack::unique_path(&dst.with_extension("jpg")) } else { dst };
+            let dst = if k == "webp" {
+                crate::pack::unique_path(&dst.with_extension("jpg"))
+            } else {
+                dst
+            };
             let ok = shrink(e.path(), &dst, k, o).is_ok();
             let after = fs::metadata(&dst).map(|m| m.len()).unwrap_or(u64::MAX);
             if ok && after < before {

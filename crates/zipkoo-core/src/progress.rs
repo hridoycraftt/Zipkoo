@@ -19,11 +19,19 @@ pub struct Reporter<'a> {
 }
 
 impl<'a> Reporter<'a> {
-    pub fn new(on_progress: &'a mut dyn FnMut(&Progress), cancel: Option<&'a AtomicBool>, total: u64) -> Self {
+    pub fn new(
+        on_progress: &'a mut dyn FnMut(&Progress),
+        cancel: Option<&'a AtomicBool>,
+        total: u64,
+    ) -> Self {
         Self {
             on_progress,
             cancel,
-            state: Progress { done_bytes: 0, total_bytes: total, current: String::new() },
+            state: Progress {
+                done_bytes: 0,
+                total_bytes: total,
+                current: String::new(),
+            },
             last_emit: std::time::Instant::now(),
         }
     }
@@ -43,7 +51,11 @@ impl<'a> Reporter<'a> {
     pub fn add(&mut self, n: u64) -> io::Result<()> {
         self.state.done_bytes += n;
         self.maybe_emit();
-        if self.cancel.map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
+        if self
+            .cancel
+            .map(|c| c.load(Ordering::Relaxed))
+            .unwrap_or(false)
+        {
             return Err(io::Error::new(io::ErrorKind::Other, "zipkoo: cancelled"));
         }
         Ok(())

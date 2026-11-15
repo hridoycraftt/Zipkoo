@@ -8,12 +8,24 @@ fn tree(dir: &Path) -> PathBuf {
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(root.join("README.md"), "# Project\n".repeat(200)).unwrap();
     fs::write(root.join("src/main.rs"), "fn main() {}\n".repeat(300)).unwrap();
-    fs::write(root.join("logo.png"), (0..50_000u32).map(|i| (i.wrapping_mul(2654435761) >> 24) as u8).collect::<Vec<_>>()).unwrap();
+    fs::write(
+        root.join("logo.png"),
+        (0..50_000u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 24) as u8)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
     root
 }
 
 fn names(p: &Path, pw: Option<&str>) -> Vec<String> {
-    let mut v: Vec<String> = inspect(p, pw).unwrap().entries.into_iter().filter(|e| !e.is_dir).map(|e| e.name).collect();
+    let mut v: Vec<String> = inspect(p, pw)
+        .unwrap()
+        .entries
+        .into_iter()
+        .filter(|e| !e.is_dir)
+        .map(|e| e.name)
+        .collect();
     v.sort();
     v
 }
@@ -25,25 +37,56 @@ fn convert_between_formats() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let zip = t.path().join("p.zip");
-    pack(&[src.clone()], &zip, &PackOptions { password: Some("pw1234".into()), ..Default::default() }, &mut |_| {}, None).unwrap();
+    pack(
+        &[src.clone()],
+        &zip,
+        &PackOptions {
+            password: Some("pw1234".into()),
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     for to in [Format::SevenZ, Format::TarZst] {
         let out = convert::converted_path(&zip, to);
-        assert_eq!(out.extension().unwrap(), if to == Format::SevenZ { "7z" } else { "zst" });
-        let opts = convert::ConvertOptions { password: Some("pw1234"), pack: PackOptions { format: to, ..Default::default() } };
+        assert_eq!(
+            out.extension().unwrap(),
+            if to == Format::SevenZ { "7z" } else { "zst" }
+        );
+        let opts = convert::ConvertOptions {
+            password: Some("pw1234"),
+            pack: PackOptions {
+                format: to,
+                ..Default::default()
+            },
+        };
         let r = convert::convert(&zip, &out, &opts, &mut |_| {}, None).unwrap();
         assert_eq!(r.files, 3);
         assert_eq!(names(&out, None), names(&zip, None));
-        assert!(!t.path().join(".zipkoo-convert").exists(), "temp folder must be cleaned up");
+        assert!(
+            !t.path().join(".zipkoo-convert").exists(),
+            "temp folder must be cleaned up"
+        );
     }
     // RAR fixture to ZIP.
     let rar = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/solid.rar");
     let out = t.path().join("from-rar.zip");
-    let opts = convert::ConvertOptions { password: None, pack: PackOptions::default() };
+    let opts = convert::ConvertOptions {
+        password: None,
+        pack: PackOptions::default(),
+    };
     convert::convert(&rar, &out, &opts, &mut |_| {}, None).unwrap();
-    assert_eq!(inspect(&out, None).unwrap().file_count, inspect(&rar, None).unwrap().file_count);
+    assert_eq!(
+        inspect(&out, None).unwrap().file_count,
+        inspect(&rar, None).unwrap().file_count
+    );
     // Never overwrites: a second converted_path picks a new name.
     fs::write(t.path().join("p.7z"), b"x").unwrap();
-    assert_eq!(convert::converted_path(&zip, Format::SevenZ), t.path().join("p (2).7z"));
+    assert_eq!(
+        convert::converted_path(&zip, Format::SevenZ),
+        t.path().join("p (2).7z")
+    );
 }
 
 // ---------- Smart Update (7) ----------
@@ -53,21 +96,44 @@ fn smart_update_adds_only_changes_and_keeps_history() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let zip = t.path().join("p.zip");
-    pack(&[src.clone()], &zip, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    pack(
+        &[src.clone()],
+        &zip,
+        &PackOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
 
     // Nothing changed.
-    let r = update::update(&zip, &[src.clone()], &update::UpdateOptions::default(), &mut |_| {}, None).unwrap();
-    assert_eq!((r.added, r.changed, r.removed, r.unchanged, r.bytes_packed), (0, 0, 0, 3, 0));
+    let r = update::update(
+        &zip,
+        &[src.clone()],
+        &update::UpdateOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        (r.added, r.changed, r.removed, r.unchanged, r.bytes_packed),
+        (0, 0, 0, 3, 0)
+    );
 
     // Edit one file, add one, delete one.
     std::thread::sleep(std::time::Duration::from_millis(2100)); // ZIP times have 2 s steps
     fs::write(src.join("README.md"), "# Project v2\n").unwrap();
     fs::write(src.join("src/lib.rs"), "pub fn x() {}\n").unwrap();
     fs::remove_file(src.join("logo.png")).unwrap();
-    let opts = update::UpdateOptions { remove_missing: true, ..Default::default() };
+    let opts = update::UpdateOptions {
+        remove_missing: true,
+        ..Default::default()
+    };
     let r = update::update(&zip, &[src.clone()], &opts, &mut |_| {}, None).unwrap();
     assert_eq!((r.added, r.changed, r.removed, r.unchanged), (1, 1, 1, 1));
-    assert_eq!(r.bytes_packed, "# Project v2\n".len() as u64 + "pub fn x() {}\n".len() as u64);
+    assert_eq!(
+        r.bytes_packed,
+        "# Project v2\n".len() as u64 + "pub fn x() {}\n".len() as u64
+    );
     assert_eq!(r.version, 2);
 
     let all = names(&zip, None);
@@ -91,14 +157,47 @@ fn smart_update_locked_archive() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let zip = t.path().join("p.zip");
-    pack(&[src.clone()], &zip, &PackOptions { password: Some("secret1".into()), ..Default::default() }, &mut |_| {}, None).unwrap();
+    pack(
+        &[src.clone()],
+        &zip,
+        &PackOptions {
+            password: Some("secret1".into()),
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     fs::write(src.join("new.txt"), "hello").unwrap();
-    assert!(matches!(update::update(&zip, &[src.clone()], &update::UpdateOptions::default(), &mut |_| {}, None), Err(Error::PasswordRequired)));
-    let opts = update::UpdateOptions { password: Some("secret1"), ..Default::default() };
+    assert!(matches!(
+        update::update(
+            &zip,
+            &[src.clone()],
+            &update::UpdateOptions::default(),
+            &mut |_| {},
+            None
+        ),
+        Err(Error::PasswordRequired)
+    ));
+    let opts = update::UpdateOptions {
+        password: Some("secret1"),
+        ..Default::default()
+    };
     let r = update::update(&zip, &[src.clone()], &opts, &mut |_| {}, None).unwrap();
     assert_eq!(r.added, 1);
-    assert_eq!(peek(&zip, "Project/new.txt", Some("secret1"), 100).unwrap(), b"hello");
-    assert!(inspect(&zip, None).unwrap().entries.iter().find(|e| e.name == "Project/new.txt").unwrap().encrypted);
+    assert_eq!(
+        peek(&zip, "Project/new.txt", Some("secret1"), 100).unwrap(),
+        b"hello"
+    );
+    assert!(
+        inspect(&zip, None)
+            .unwrap()
+            .entries
+            .iter()
+            .find(|e| e.name == "Project/new.txt")
+            .unwrap()
+            .encrypted
+    );
 }
 
 #[test]
@@ -106,13 +205,30 @@ fn timestamps_survive_round_trip() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let past = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
-    filetime::set_file_mtime(src.join("README.md"), filetime::FileTime::from_system_time(past)).unwrap();
+    filetime::set_file_mtime(
+        src.join("README.md"),
+        filetime::FileTime::from_system_time(past),
+    )
+    .unwrap();
     for f in [Format::Zip, Format::SevenZ, Format::TarZst] {
         let out = t.path().join(format!("t.{}", f.extension()));
-        pack(&[src.clone()], &out, &PackOptions { format: f, ..Default::default() }, &mut |_| {}, None).unwrap();
+        pack(
+            &[src.clone()],
+            &out,
+            &PackOptions {
+                format: f,
+                ..Default::default()
+            },
+            &mut |_| {},
+            None,
+        )
+        .unwrap();
         let d = t.path().join(format!("x-{}", f.extension()));
         extract(&out, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
-        let got = fs::metadata(d.join("Project/README.md")).unwrap().modified().unwrap();
+        let got = fs::metadata(d.join("Project/README.md"))
+            .unwrap()
+            .modified()
+            .unwrap();
         assert_eq!(got, past, "{f:?}");
     }
 }
@@ -129,14 +245,29 @@ fn archive_with_repair(t: &Path, percent: u8) -> (PathBuf, Vec<u8>) {
     let root = t.join("Data");
     fs::create_dir_all(&root).unwrap();
     // ~3 MB of incompressible data so the archive is big enough to have many blocks.
-    let noise: Vec<u8> = (0..3_000_000u32).map(|i| (i.wrapping_mul(2654435761).rotate_left(i % 13) >> 11) as u8).collect();
+    let noise: Vec<u8> = (0..3_000_000u32)
+        .map(|i| (i.wrapping_mul(2654435761).rotate_left(i % 13) >> 11) as u8)
+        .collect();
     fs::write(root.join("noise.bin"), &noise).unwrap();
     let zip = t.join("d.zip");
-    pack(&[root], &zip, &PackOptions { smart: false, ..Default::default() }, &mut |_| {}, None).unwrap();
+    pack(
+        &[root],
+        &zip,
+        &PackOptions {
+            smart: false,
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     let rec = heal::create(&zip, percent, &mut |_| {}, None).unwrap();
     assert!(rec.path.exists());
     let ratio = rec.size as f64 / fs::metadata(&zip).unwrap().len() as f64;
-    assert!(ratio < percent as f64 / 100.0 * 1.6 + 0.02, "repair file too big: {ratio}");
+    assert!(
+        ratio < percent as f64 / 100.0 * 1.6 + 0.02,
+        "repair file too big: {ratio}"
+    );
     (zip.clone(), fs::read(&zip).unwrap())
 }
 
@@ -144,7 +275,9 @@ fn archive_with_repair(t: &Path, percent: u8) -> (PathBuf, Vec<u8>) {
 fn heal_fixes_scattered_and_burst_damage() {
     let t = tempfile::tempdir().unwrap();
     let (zip, original) = archive_with_repair(t.path(), 10);
-    assert!(heal::check(&zip, false, &mut |_| {}, None).unwrap().healthy());
+    assert!(heal::check(&zip, false, &mut |_| {}, None)
+        .unwrap()
+        .healthy());
 
     // A burst of 150 KB (≈5% of the file) plus a few scattered hits.
     damage(&zip, 400_000, 150_000);
@@ -153,12 +286,30 @@ fn heal_fixes_scattered_and_burst_damage() {
     damage(&zip, len - 5_000, 1);
     let h = heal::check(&zip, false, &mut |_| {}, None).unwrap();
     assert!(h.damaged > 0 && h.repairable(), "{h:?}");
-    assert!(extract(&zip, &t.path().join("bad"), &ExtractOptions::default(), &mut |_| {}, None).is_err());
+    assert!(extract(
+        &zip,
+        &t.path().join("bad"),
+        &ExtractOptions::default(),
+        &mut |_| {},
+        None
+    )
+    .is_err());
 
     let h = heal::check(&zip, true, &mut |_| {}, None).unwrap();
     assert_eq!(h.repaired, h.damaged);
-    assert_eq!(fs::read(&zip).unwrap(), original, "repaired file must match the original byte for byte");
-    extract(&zip, &t.path().join("good"), &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    assert_eq!(
+        fs::read(&zip).unwrap(),
+        original,
+        "repaired file must match the original byte for byte"
+    );
+    extract(
+        &zip,
+        &t.path().join("good"),
+        &ExtractOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -178,13 +329,30 @@ fn update_rebuilds_repair_data() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let zip = t.path().join("p.zip");
-    pack(&[src.clone()], &zip, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    pack(
+        &[src.clone()],
+        &zip,
+        &PackOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     heal::create(&zip, 10, &mut |_| {}, None).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(2100));
     fs::write(src.join("added.txt"), "x".repeat(10_000)).unwrap();
-    update::update(&zip, &[src], &update::UpdateOptions::default(), &mut |_| {}, None).unwrap();
+    update::update(
+        &zip,
+        &[src],
+        &update::UpdateOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     let h = heal::check(&zip, false, &mut |_| {}, None).unwrap();
-    assert!(h.healthy(), "repair data must match the updated archive: {h:?}");
+    assert!(
+        h.healthy(),
+        "repair data must match the updated archive: {h:?}"
+    );
 }
 
 #[test]
@@ -192,11 +360,30 @@ fn wrong_zip_password_caught_on_open_and_update() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let zip = t.path().join("p.zip");
-    pack(&[src.clone()], &zip, &PackOptions { password: Some("right-one".into()), ..Default::default() }, &mut |_| {}, None).unwrap();
-    assert!(matches!(inspect(&zip, Some("typo")), Err(Error::WrongPassword)));
+    pack(
+        &[src.clone()],
+        &zip,
+        &PackOptions {
+            password: Some("right-one".into()),
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
+    assert!(matches!(
+        inspect(&zip, Some("typo")),
+        Err(Error::WrongPassword)
+    ));
     assert!(inspect(&zip, Some("right-one")).is_ok());
-    let opts = update::UpdateOptions { password: Some("typo"), ..Default::default() };
-    assert!(matches!(update::update(&zip, &[src], &opts, &mut |_| {}, None), Err(Error::WrongPassword)));
+    let opts = update::UpdateOptions {
+        password: Some("typo"),
+        ..Default::default()
+    };
+    assert!(matches!(
+        update::update(&zip, &[src], &opts, &mut |_| {}, None),
+        Err(Error::WrongPassword)
+    ));
 }
 
 #[test]
@@ -204,10 +391,24 @@ fn history_folder_is_not_extracted_or_counted() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let zip = t.path().join("p.zip");
-    pack(&[src.clone()], &zip, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    pack(
+        &[src.clone()],
+        &zip,
+        &PackOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(2100));
     fs::write(src.join("README.md"), "changed").unwrap();
-    update::update(&zip, &[src], &update::UpdateOptions::default(), &mut |_| {}, None).unwrap();
+    update::update(
+        &zip,
+        &[src],
+        &update::UpdateOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     assert_eq!(inspect(&zip, None).unwrap().file_count, 3);
     let d = t.path().join("out");
     extract(&zip, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
@@ -222,7 +423,15 @@ fn opens_own_self_extracting_file_as_archive() {
     let stub = t.path().join("stub.bin");
     fs::write(&stub, vec![0x4d, 0x5a, 0, 0, 1, 2, 3]).unwrap();
     let exe = t.path().join("Gift.exe");
-    sfx::build(&stub, &[src], &exe, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    sfx::build(
+        &stub,
+        &[src],
+        &exe,
+        &PackOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     let info = inspect(&exe, None).unwrap();
     assert_eq!((info.format, info.file_count), (Format::Zip, 3));
     let d = t.path().join("x");
@@ -235,12 +444,51 @@ fn split_parts_leave_no_temp_files() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let out = t.path().join("s.zip");
-    let r = pack(&[src], &out, &PackOptions { smart: false, split_size: Some(20_000), ..Default::default() }, &mut |_| {}, None).unwrap();
-    let before = fs::read_dir(std::env::temp_dir()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with(&format!("zipkoo-join-{}-", std::process::id()))).count();
+    let r = pack(
+        &[src],
+        &out,
+        &PackOptions {
+            smart: false,
+            split_size: Some(20_000),
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
+    let before = fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("zipkoo-join-{}-", std::process::id()))
+        })
+        .count();
     inspect(&r.outputs[0], None).unwrap();
-    extract(&r.outputs[0], &t.path().join("x"), &ExtractOptions::default(), &mut |_| {}, None).unwrap();
-    let after = fs::read_dir(std::env::temp_dir()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with(&format!("zipkoo-join-{}-", std::process::id()))).count();
-    assert!(after <= before, "joined copies must be cleaned up ({before} -> {after})");
+    extract(
+        &r.outputs[0],
+        &t.path().join("x"),
+        &ExtractOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
+    let after = fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("zipkoo-join-{}-", std::process::id()))
+        })
+        .count();
+    assert!(
+        after <= before,
+        "joined copies must be cleaned up ({before} -> {after})"
+    );
 }
 
 #[test]
@@ -248,7 +496,12 @@ fn heal_fixes_cut_off_download() {
     let t = tempfile::tempdir().unwrap();
     let (zip, original) = archive_with_repair(t.path(), 10);
     let len = original.len() as u64;
-    fs::OpenOptions::new().write(true).open(&zip).unwrap().set_len(len - 120_000).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&zip)
+        .unwrap()
+        .set_len(len - 120_000)
+        .unwrap();
     let h = heal::check(&zip, false, &mut |_| {}, None).unwrap();
     assert!(!h.size_ok && h.repairable(), "{h:?}");
     heal::check(&zip, true, &mut |_| {}, None).unwrap();
@@ -272,19 +525,35 @@ fn snapshots_skip_unchanged_and_prune() {
     let t = tempfile::tempdir().unwrap();
     let src = tree(t.path());
     let dest = t.path().join("Backups");
-    let opts = backup::BackupOptions { keep: 2, recovery_percent: Some(5), ..Default::default() };
-    let s1 = backup::snapshot(&src, &dest, &opts, &mut |_| {}, None).unwrap().expect("first snapshot");
+    let opts = backup::BackupOptions {
+        keep: 2,
+        recovery_percent: Some(5),
+        ..Default::default()
+    };
+    let s1 = backup::snapshot(&src, &dest, &opts, &mut |_| {}, None)
+        .unwrap()
+        .expect("first snapshot");
     assert!(heal::recovery_path(&s1.path).exists());
-    assert!(backup::snapshot(&src, &dest, &opts, &mut |_| {}, None).unwrap().is_none(), "nothing changed");
+    assert!(
+        backup::snapshot(&src, &dest, &opts, &mut |_| {}, None)
+            .unwrap()
+            .is_none(),
+        "nothing changed"
+    );
     for i in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
         fs::write(src.join("README.md"), format!("v{i}")).unwrap();
-        backup::snapshot(&src, &dest, &opts, &mut |_| {}, None).unwrap().expect("changed");
+        backup::snapshot(&src, &dest, &opts, &mut |_| {}, None)
+            .unwrap()
+            .expect("changed");
     }
     let all = backup::snapshots(&dest, "Project", Format::Zip);
     assert_eq!(all.len(), 2, "{all:?}");
     assert!(!s1.path.exists() && !heal::recovery_path(&s1.path).exists());
-    assert_eq!(peek(all.last().unwrap(), "Project/README.md", None, 100).unwrap(), b"v2");
+    assert_eq!(
+        peek(all.last().unwrap(), "Project/README.md", None, 100).unwrap(),
+        b"v2"
+    );
 }
 
 // ---------- Search, duplicates, photo shrinking (11) ----------
@@ -295,8 +564,25 @@ fn search_across_archives() {
     let src = tree(t.path());
     let lib = t.path().join("Library");
     fs::create_dir_all(lib.join("deep/er")).unwrap();
-    pack(&[src.clone()], &lib.join("a.zip"), &PackOptions::default(), &mut |_| {}, None).unwrap();
-    pack(&[src.join("src")], &lib.join("deep/er/b.7z"), &PackOptions { format: Format::SevenZ, ..Default::default() }, &mut |_| {}, None).unwrap();
+    pack(
+        &[src.clone()],
+        &lib.join("a.zip"),
+        &PackOptions::default(),
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
+    pack(
+        &[src.join("src")],
+        &lib.join("deep/er/b.7z"),
+        &PackOptions {
+            format: Format::SevenZ,
+            ..Default::default()
+        },
+        &mut |_| {},
+        None,
+    )
+    .unwrap();
     fs::write(lib.join("not-an-archive.txt"), "x").unwrap();
     let found = index::find_archives(&lib, 8);
     assert_eq!(found.len(), 2);
@@ -304,12 +590,22 @@ fn search_across_archives() {
     let mut ix = index::Index::open(&t.path().join("data/index.db")).unwrap();
     let r = ix.refresh(&found).unwrap();
     assert_eq!((r.indexed, r.unchanged), (2, 0));
-    assert_eq!(ix.refresh(&found).unwrap().unchanged, 2, "unchanged archives are not re-read");
+    assert_eq!(
+        ix.refresh(&found).unwrap().unchanged,
+        2,
+        "unchanged archives are not re-read"
+    );
 
     let hits = ix.search("MAIN rs", 50).unwrap();
     assert_eq!(hits.len(), 2);
-    assert!(hits.iter().any(|h| h.archive.ends_with("b.7z") && h.name == "src/main.rs"));
-    assert!(ix.search("readme", 50).unwrap().iter().all(|h| h.archive.ends_with("a.zip")));
+    assert!(hits
+        .iter()
+        .any(|h| h.archive.ends_with("b.7z") && h.name == "src/main.rs"));
+    assert!(ix
+        .search("readme", 50)
+        .unwrap()
+        .iter()
+        .all(|h| h.archive.ends_with("a.zip")));
     assert!(ix.search("nothing-like-this", 50).unwrap().is_empty());
 
     fs::remove_file(lib.join("a.zip")).unwrap();
@@ -342,12 +638,24 @@ fn shrinks_photos_and_keeps_others() {
     let t = tempfile::tempdir().unwrap();
     let d = t.path().join("Trip");
     fs::create_dir_all(&d).unwrap();
-    let img = image::RgbImage::from_fn(4000, 3000, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x * y) % 256) as u8]));
+    let img = image::RgbImage::from_fn(4000, 3000, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x * y) % 256) as u8])
+    });
     img.save(d.join("big.jpg")).unwrap();
-    image::RgbImage::from_pixel(100, 80, image::Rgb([10, 200, 30])).save(d.join("small.png")).unwrap();
+    image::RgbImage::from_pixel(100, 80, image::Rgb([10, 200, 30]))
+        .save(d.join("small.png"))
+        .unwrap();
     fs::write(d.join("notes.txt"), "keep me").unwrap();
     let out = t.path().join("Trip-small");
-    let r = optimize::optimize(&[d.clone()], &out, &optimize::OptimizeOptions { max_edge: 1600, quality: 80 }).unwrap();
+    let r = optimize::optimize(
+        &[d.clone()],
+        &out,
+        &optimize::OptimizeOptions {
+            max_edge: 1600,
+            quality: 80,
+        },
+    )
+    .unwrap();
     assert_eq!((r.images, r.copied), (2, 1));
     assert!(r.after < r.before);
     let (w, h) = image::image_dimensions(out.join("Trip/big.jpg")).unwrap();

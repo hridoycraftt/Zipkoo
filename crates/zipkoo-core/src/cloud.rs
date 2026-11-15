@@ -14,14 +14,22 @@ pub struct CloudFolder {
 
 fn push(v: &mut Vec<CloudFolder>, provider: &'static str, label: String, path: PathBuf) {
     if path.is_dir() && !v.iter().any(|c| c.path == path) {
-        v.push(CloudFolder { provider, label, path });
+        v.push(CloudFolder {
+            provider,
+            label,
+            path,
+        });
     }
 }
 
 /// Dropbox writes its folders to info.json: {"personal": {"path": ...}, "business": {...}}.
 fn dropbox_info(file: &Path, v: &mut Vec<CloudFolder>) {
-    let Ok(s) = std::fs::read_to_string(file) else { return };
-    let Ok(j) = serde_json::from_str::<serde_json::Value>(&s) else { return };
+    let Ok(s) = std::fs::read_to_string(file) else {
+        return;
+    };
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(&s) else {
+        return;
+    };
     for (kind, label) in [("personal", "Dropbox"), ("business", "Dropbox (Business)")] {
         if let Some(p) = j[kind]["path"].as_str() {
             push(v, "dropbox", label.into(), PathBuf::from(p));
@@ -36,7 +44,10 @@ pub fn detect_in(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> Vec<Cloud
         let mut found: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();
         found.sort();
         for p in found {
-            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let (provider, base) = if name.starts_with("GoogleDrive") {
                 ("google-drive", "Google Drive")
             } else if name.starts_with("OneDrive") {
@@ -54,14 +65,27 @@ pub fn detect_in(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> Vec<Cloud
                 _ => base.to_string(),
             };
             // Google Drive keeps the user's files in "My Drive".
-            let path = if provider == "google-drive" && p.join("My Drive").is_dir() { p.join("My Drive") } else { p };
+            let path = if provider == "google-drive" && p.join("My Drive").is_dir() {
+                p.join("My Drive")
+            } else {
+                p
+            };
             push(&mut v, provider, label, path);
         }
     }
-    push(&mut v, "icloud", "iCloud Drive".into(), home.join("Library/Mobile Documents/com~apple~CloudDocs"));
+    push(
+        &mut v,
+        "icloud",
+        "iCloud Drive".into(),
+        home.join("Library/Mobile Documents/com~apple~CloudDocs"),
+    );
 
     // Windows: OneDrive sets environment variables; Dropbox writes info.json.
-    for (var, label) in [("OneDriveConsumer", "OneDrive"), ("OneDriveCommercial", "OneDrive (Work)"), ("OneDrive", "OneDrive")] {
+    for (var, label) in [
+        ("OneDriveConsumer", "OneDrive"),
+        ("OneDriveCommercial", "OneDrive (Work)"),
+        ("OneDrive", "OneDrive"),
+    ] {
         if let Some(p) = env(var) {
             push(&mut v, "onedrive", label.into(), PathBuf::from(p));
         }
@@ -82,12 +106,20 @@ pub fn detect_in(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> Vec<Cloud
     // Common default folders (Linux, older installs).
     push(&mut v, "dropbox", "Dropbox".into(), home.join("Dropbox"));
     push(&mut v, "onedrive", "OneDrive".into(), home.join("OneDrive"));
-    push(&mut v, "google-drive", "Google Drive".into(), home.join("Google Drive"));
+    push(
+        &mut v,
+        "google-drive",
+        "Google Drive".into(),
+        home.join("Google Drive"),
+    );
     v
 }
 
 pub fn detect() -> Vec<CloudFolder> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_default();
     detect_in(&home, &|k| std::env::var(k).ok())
 }
 
@@ -109,7 +141,11 @@ mod tests {
         let dbx = t.join("Dropbox (Home)");
         std::fs::create_dir_all(&dbx).unwrap();
         std::fs::create_dir_all(t.join("AppData/Local/Dropbox")).unwrap();
-        std::fs::write(t.join("AppData/Local/Dropbox/info.json"), format!(r#"{{"personal":{{"path":{:?}}}}}"#, dbx.to_string_lossy())).unwrap();
+        std::fs::write(
+            t.join("AppData/Local/Dropbox/info.json"),
+            format!(r#"{{"personal":{{"path":{:?}}}}}"#, dbx.to_string_lossy()),
+        )
+        .unwrap();
 
         let od2 = od.clone();
         let local = t.join("AppData/Local");
@@ -120,7 +156,10 @@ mod tests {
         };
         let v = detect_in(&t, &env);
         let labels: Vec<&str> = v.iter().map(|c| c.label.as_str()).collect();
-        assert!(labels.contains(&"Google Drive (rina@example.com)"), "{labels:?}");
+        assert!(
+            labels.contains(&"Google Drive (rina@example.com)"),
+            "{labels:?}"
+        );
         assert!(v.iter().any(|c| c.path.ends_with("My Drive")));
         assert!(labels.contains(&"OneDrive (Contoso)"));
         assert!(labels.contains(&"iCloud Drive"));

@@ -5,9 +5,12 @@ import { openPath as osOpen, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { applyTheme, loadSettings, saveSettings, type Settings } from "./settings";
 import { SettingsView } from "./components/SettingsView";
 import {
+  passwordAdd, passwordFind, salvageZip, scanAvailable, virusScan,
   ARCHIVE_EXTS, EDITABLE, appInfo, editArchive, extractConflicts, trashPath, openEntry, prepareDrag, type Change, type Entry,
   cloudFolders, convertArchives, shareFile, updateArchive, type CloudFolder,
   asUiError, cancelJob, extractArchive, inspectArchive, isArchive, onProgress, onShellActions, packFiles, sfxAvailable,
@@ -62,6 +65,7 @@ export default function App() {
   const [shell, setShell] = useState<ShellStatus>({ supported: false, installed: false });
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const settingsRef = useRef(settings);
+  const scannerRef = useRef<string | null>(null);
   settingsRef.current = settings;
   const updateSettings = useCallback((patch: Partial<Settings>) => {
     setSettings((cur) => {
@@ -73,6 +77,8 @@ export default function App() {
   useEffect(() => applyTheme(settings.theme), [settings.theme]);
   const [view, setView] = useState<View>({ kind: "home" });
   const [clouds, setClouds] = useState<CloudFolder[]>([]);
+  const [scanner, setScanner] = useState<string | null>(null);
+  scannerRef.current = scanner;
   const [shareServer, setShareServerState] = useState<string>(() => store.get("shareServer", ""));
   const setShareServer = (v: string) => {
     setShareServerState(v);
@@ -97,6 +103,7 @@ export default function App() {
     sfxAvailable().then(setSfxOk).catch(() => {});
     shellStatus().then(setShell).catch(() => {});
     cloudFolders().then(setClouds).catch(() => {});
+    scanAvailable().then(setScanner).catch(() => {});
   }, []);
 
   const remember = useCallback((p: string) => {
@@ -164,11 +171,14 @@ export default function App() {
 
 
 
+  const openPathRef = useRef<(p: string) => void>(() => {});
   const openPath = useCallback(
     async (path: string, password?: string) => {
       try {
         const info = await inspectArchive(path, password);
         if (info.encrypted && !password) {
+          const saved = await passwordFind(path).catch(() => null);
+          if (saved) return openPath(path, saved);
           askPassword(path, (pw) => openPath(path, pw));
           return;
         }
@@ -178,13 +188,37 @@ export default function App() {
         remember(path);
       } catch (err) {
         const e = asUiError(err);
+        if (e.code === "password_required" && !password) {
+          const saved = await passwordFind(path).catch(() => null);
+          if (saved) return openPath(path, saved);
+        }
         if (e.code === "password_required" || (e.code === "wrong_password" && !password)) askPassword(path, (pw) => openPath(path, pw));
         else if (e.code === "wrong_password") askPassword(path, (pw) => openPath(path, pw), true);
-        else failToast(e);
+        else if (e.code !== "cancelled" && /\.(zip|zipx)$/i.test(path)) {
+          setToast({
+            kind: "err",
+            text: t("salvageOffer"),
+            sub: errorText(e),
+            action: {
+              label: t("salvageBtn"),
+              run: async () => {
+                const r = await runJob(t("salvaging"), (id) => salvageZip(id, path));
+                if (!r) return;
+                setToast({
+                  kind: "ok",
+                  text: t("salvageDone", { n: num(r.recovered, lang), name: baseName(r.output) }),
+                  sub: r.lost.length ? t("salvageLost", { n: num(r.lost.length, lang) }) : undefined,
+                  action: { label: t("open"), run: () => openPathRef.current(r.output) },
+                });
+              },
+            },
+          });
+        } else failToast(e);
       }
     },
-    [remember, askPassword, failToast],
+    [remember, askPassword, failToast, t, lang, errorText, runJob],
   );
+  openPathRef.current = (p) => void openPath(p);
 
   const startPack = useCallback(
     async (req: PackRequest) => {
@@ -229,6 +263,10 @@ export default function App() {
         }
       } catch (err) {
         const e = asUiError(err);
+        if (e.code === "password_required" && !opts.password) {
+          const saved = await passwordFind(path).catch(() => null);
+          if (saved) return runExtract(path, { ...opts, password: saved });
+        }
         if (e.code === "password_required" || e.code === "wrong_password") {
           return new Promise((resolve) =>
             askPassword(path, (pw) => {
@@ -269,6 +307,21 @@ export default function App() {
         });
         remember(path);
         const prefs = settingsRef.current;
+        // Scan what came out before saying it's done.
+        let scanNote: string | undefined;
+        if (prefs.scanAfterExtract && scannerRef.current && r.files > 0) {
+          setJob((j) => (j?.id === id ? { ...j, title: t("scanning"), progress: null } : j));
+          try {
+            const sr = await virusScan(result);
+            if (!sr.clean) {
+              setToast({ kind: "err", text: t("scanThreats", { engine: sr.engine, n: num(sr.threats.length, lang) }), sub: sr.threats.slice(0, 4).join(" · "), action: { label: t("showInFolder"), run: () => revealItemInDir(result) } });
+              return true;
+            }
+            scanNote = t("scanClean", { engine: sr.engine });
+          } catch {
+            /* scanner failed to run: don't block the result */
+          }
+        }
         if (prefs.openAfterExtract) revealItemInDir(result).catch(() => {});
         let trashed = false;
         // Only when everything came out fine, the whole archive was extracted, and it's a single file.
@@ -289,7 +342,7 @@ export default function App() {
         setToast({
           kind: "ok",
           text: t("extractedToast", { n: num(r.files, lang), dest: baseName(result) }) + (trashed ? ` ${t("movedToTrash")}` : ""),
-          sub: r.skipped.length ? `${t("skippedNote", { n: num(r.skipped.length, lang) })}: ${r.skipped.slice(0, 3).map(([n, why]) => `${baseName(n)} (${why})`).join(", ")}` : undefined,
+          sub: [r.skipped.length ? `${t("skippedNote", { n: num(r.skipped.length, lang) })}: ${r.skipped.slice(0, 3).map(([n, why]) => `${baseName(n)} (${why})`).join(", ")}` : "", scanNote ?? ""].filter(Boolean).join(" · ") || undefined,
           action: { label: t("showInFolder"), run: () => revealItemInDir(result) },
         });
         return true;
@@ -432,6 +485,33 @@ export default function App() {
     },
     [failToast],
   );
+
+  // Taskbar (Windows) / Dock (macOS) progress follows the running job.
+  const jobActive = !!job;
+  const pct = job?.progress && job.progress.total_bytes > 0 ? Math.min(100, Math.round((job.progress.done_bytes / job.progress.total_bytes) * 100)) : null;
+  useEffect(() => {
+    const w = getCurrentWindow();
+    const state = jobActive
+      ? pct === null ? { status: ProgressBarStatus.Indeterminate } : { status: ProgressBarStatus.Normal, progress: pct }
+      : { status: ProgressBarStatus.None };
+    w.setProgressBar(state).catch(() => {});
+  }, [jobActive, pct]);
+
+  // When a job ends while you're in another app, say so with a system notification.
+  const lastToast = useRef<ToastData | null>(null);
+  useEffect(() => {
+    if (!toast || toast === lastToast.current) return;
+    lastToast.current = toast;
+    if (toast.kind === "info" && !/Stopped|থামানো/.test(toast.text)) return;
+    (async () => {
+      const focused = await getCurrentWindow().isFocused().catch(() => true);
+      if (focused) return;
+      let ok = await isPermissionGranted().catch(() => false);
+      if (!ok) ok = (await requestPermission().catch(() => "denied")) === "granted";
+      if (ok) sendNotification({ title: "Zipkoo", body: toast.sub ? `${toast.text}\n${toast.sub}` : toast.text });
+      getCurrentWindow().requestUserAttention(2).catch(() => {});
+    })();
+  }, [toast]);
 
   useEffect(() => {
     const un = onProgress((id, p) => setJob((j) => (j && j.id === id ? { ...j, progress: p } : j)));
@@ -659,7 +739,7 @@ export default function App() {
         ) : view.kind === "shares" ? (
           <SharesView ctx={ctx} server={shareServer} setServer={setShareServer} askPassword={(name, retry, wrong) => setPwPrompt({ path: name, error: wrong ? t("wrongPw") : undefined, then: (pw) => { setPwPrompt(null); retry(pw); } })} />
         ) : view.kind === "settings" ? (
-          <SettingsView t={t} lang={lang} setLang={setLang} settings={settings} update={updateSettings} shell={shell} toggleShell={toggleShell} shareServer={shareServer} setShareServer={setShareServer} checkUpdates={() => checkUpdates(false)} />
+          <SettingsView scanner={scanner} t={t} lang={lang} setLang={setLang} settings={settings} update={updateSettings} shell={shell} toggleShell={toggleShell} shareServer={shareServer} setShareServer={setShareServer} checkUpdates={() => checkUpdates(false)} />
         ) : view.kind === "tools" ? (
           <ToolsView ctx={ctx} />
         ) : view.kind === "cloud" ? (
@@ -748,7 +828,15 @@ export default function App() {
         </div>
       )}
       {pwPrompt && (
-        <PasswordDialog t={t} name={baseName(pwPrompt.path)} error={pwPrompt.error} onSubmit={(pw) => pwPrompt.then(pw)} onCancel={() => { pwPrompt.cancel?.(); setPwPrompt(null); }} />
+        <PasswordDialog t={t} name={baseName(pwPrompt.path)} error={pwPrompt.error} onSubmit={(pw, remember) => {
+            const target = pwPrompt.path;
+            if (remember && /[\\/]/.test(target)) {
+              passwordAdd(baseName(target), pw, target)
+                .then(() => setToast({ kind: "ok", text: t("pwSaved") }))
+                .catch(() => {});
+            }
+            pwPrompt.then(pw);
+          }} onCancel={() => { pwPrompt.cancel?.(); setPwPrompt(null); }} />
       )}
       {job && (
         <ProgressOverlay t={t} lang={lang} title={job.title ?? (job.kind === "pack" ? t("working") : t("extracting"))} progress={job.progress} onCancel={() => cancelJob(job.id)} />

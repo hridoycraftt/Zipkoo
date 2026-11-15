@@ -4,14 +4,23 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 const RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
 /// Make one path component safe to create on Windows: no reserved device names (CON, NUL,
 /// COM1, also with an extension like "nul.txt"), no trailing dots or spaces, no `<>:"|?*`.
 pub fn windows_safe(component: &str) -> String {
-    let mut s: String = component.chars().map(|c| if "<>:\"|?*".contains(c) || (c as u32) < 32 { '_' } else { c }).collect();
+    let mut s: String = component
+        .chars()
+        .map(|c| {
+            if "<>:\"|?*".contains(c) || (c as u32) < 32 {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
     while s.ends_with('.') || s.ends_with(' ') {
         s.pop();
     }
@@ -57,8 +66,8 @@ pub fn safe_join(dest: &Path, entry_name: &str) -> Result<PathBuf> {
 }
 
 const EXECUTABLE: &[&str] = &[
-    "exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "vbe", "js", "jse", "wsf", "hta", "cpl",
-    "lnk", "jar", "app", "command", "sh", "pkg", "dmg", "reg", "dll",
+    "exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "vbe", "js", "jse", "wsf", "hta",
+    "cpl", "lnk", "jar", "app", "command", "sh", "pkg", "dmg", "reg", "dll",
 ];
 
 /// True when the file could run code when opened.
@@ -83,8 +92,17 @@ impl Budget {
     /// honestly declares (plus 1 MB slack). Declared sizes are checked against free disk space before
     /// extraction starts, so an archive cannot claim terabytes and fill the disk; one that lies about
     /// its sizes is stopped here when its real output passes the limit.
-    pub fn for_archive(archive_size: u64, ratio: u64, floor: u64, declared: u64, hard_cap: Option<u64>) -> Self {
-        let mut limit = archive_size.saturating_mul(ratio).max(floor).max(declared.saturating_add(1 << 20));
+    pub fn for_archive(
+        archive_size: u64,
+        ratio: u64,
+        floor: u64,
+        declared: u64,
+        hard_cap: Option<u64>,
+    ) -> Self {
+        let mut limit = archive_size
+            .saturating_mul(ratio)
+            .max(floor)
+            .max(declared.saturating_add(1 << 20));
         if let Some(cap) = hard_cap {
             limit = limit.min(cap);
         }
@@ -136,8 +154,14 @@ mod tests {
         assert!(safe_join(d, "/etc/passwd").is_err());
         assert!(safe_join(d, "a/../../b").is_err());
         assert!(safe_join(d, "..\\..\\win.ini").is_err());
-        assert_eq!(safe_join(d, "a/b.txt").unwrap(), Path::new("/tmp/out/a/b.txt"));
-        assert_eq!(safe_join(d, "./a\\b.txt").unwrap(), Path::new("/tmp/out/a/b.txt"));
+        assert_eq!(
+            safe_join(d, "a/b.txt").unwrap(),
+            Path::new("/tmp/out/a/b.txt")
+        );
+        assert_eq!(
+            safe_join(d, "./a\\b.txt").unwrap(),
+            Path::new("/tmp/out/a/b.txt")
+        );
     }
 
     #[test]

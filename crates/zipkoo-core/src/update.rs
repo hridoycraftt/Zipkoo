@@ -45,7 +45,12 @@ pub struct UpdateOptions<'a> {
 
 impl Default for UpdateOptions<'_> {
     fn default() -> Self {
-        Self { password: None, keep_history: true, remove_missing: false, smart: true }
+        Self {
+            password: None,
+            keep_history: true,
+            remove_missing: false,
+            smart: true,
+        }
     }
 }
 
@@ -76,7 +81,12 @@ fn collect(inputs: &[PathBuf]) -> Result<BTreeMap<String, Option<Src>>> {
             if e.file_type().is_symlink() {
                 continue;
             }
-            let name = e.path().strip_prefix(&base).unwrap_or(e.path()).to_string_lossy().replace('\\', "/");
+            let name = e
+                .path()
+                .strip_prefix(&base)
+                .unwrap_or(e.path())
+                .to_string_lossy()
+                .replace('\\', "/");
             if name.is_empty() {
                 continue;
             }
@@ -84,7 +94,14 @@ fn collect(inputs: &[PathBuf]) -> Result<BTreeMap<String, Option<Src>>> {
                 out.insert(format!("{name}/"), None);
             } else {
                 let m = e.metadata().map_err(|e| Error::Io(e.into()))?;
-                out.insert(name, Some(Src { path: e.path().to_path_buf(), size: m.len(), mtime: m.modified().ok().and_then(zip_round) }));
+                out.insert(
+                    name,
+                    Some(Src {
+                        path: e.path().to_path_buf(),
+                        size: m.len(),
+                        mtime: m.modified().ok().and_then(zip_round),
+                    }),
+                );
             }
         }
     }
@@ -107,7 +124,9 @@ fn crc_of(path: &Path) -> std::io::Result<u32> {
 
 pub fn read_manifest(archive: &Path) -> Result<Manifest> {
     let mut z = zip::ZipArchive::new(BufReader::new(File::open(archive)?))?;
-    let Some(i) = z.index_for_name(MANIFEST) else { return Ok(Manifest::default()) };
+    let Some(i) = z.index_for_name(MANIFEST) else {
+        return Ok(Manifest::default());
+    };
     let mut s = String::new();
     z.by_index(i)?.read_to_string(&mut s)?;
     serde_json::from_str(&s).map_err(|e| Error::Damaged(format!("history: {e}")))
@@ -130,22 +149,44 @@ pub fn update(
     let wanted = collect(inputs)?;
 
     // What is in the archive now (ignoring our own history folder).
-    struct Old { idx: usize, size: u64, crc: u32, mtime: Option<SystemTime>, encrypted: bool }
+    struct Old {
+        idx: usize,
+        size: u64,
+        crc: u32,
+        mtime: Option<SystemTime>,
+        encrypted: bool,
+    }
     let mut current: BTreeMap<String, Old> = BTreeMap::new();
     for i in 0..old.len() {
         let f = old.by_index_raw(i)?;
-        let name = f.name()?.to_string();
+        let name = crate::names::zip_name(&f);
         if name.starts_with(".zipkoo/") {
             continue;
         }
-        current.insert(name, Old { idx: i, size: f.size(), crc: f.crc32(), mtime: f.last_modified().and_then(from_zip_time), encrypted: f.encrypted() });
+        current.insert(
+            name,
+            Old {
+                idx: i,
+                size: f.size(),
+                crc: f.crc32(),
+                mtime: f.last_modified().and_then(from_zip_time),
+                encrypted: f.encrypted(),
+            },
+        );
     }
     if current.values().any(|o| o.encrypted) && opts.password.is_none() {
         return Err(Error::PasswordRequired);
     }
 
     let next_version = manifest.versions.last().map(|v| v.version + 1).unwrap_or(1);
-    let mut v = Version { version: next_version, time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0), ..Default::default() };
+    let mut v = Version {
+        version: next_version,
+        time: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        ..Default::default()
+    };
 
     // Decide per file.
     let mut to_pack: Vec<(&String, &Src)> = Vec::new();
@@ -166,7 +207,8 @@ pub fn update(
             }
             Some(o) => {
                 let same = o.size == src.size
-                    && (o.mtime.is_some() && o.mtime == src.mtime || crc_of(&src.path).map(|c| c == o.crc).unwrap_or(false));
+                    && (o.mtime.is_some() && o.mtime == src.mtime
+                        || crc_of(&src.path).map(|c| c == o.crc).unwrap_or(false));
                 if same {
                     keep.insert(name.clone());
                 } else {
@@ -176,7 +218,11 @@ pub fn update(
             }
         }
     }
-    let removed: Vec<String> = current.keys().filter(|n| !wanted.contains_key(*n)).cloned().collect();
+    let removed: Vec<String> = current
+        .keys()
+        .filter(|n| !wanted.contains_key(*n))
+        .cloned()
+        .collect();
     if opts.remove_missing {
         v.removed = removed.clone();
     } else {
@@ -190,7 +236,7 @@ pub fn update(
         let mut zw = zip::ZipWriter::new(BufWriter::new(File::create(&tmp)?));
         // 1. Unchanged entries and old history: copied raw, no recompression, no decryption.
         for i in 0..old.len() {
-            let name = old.by_index_raw(i)?.name()?.to_string();
+            let name = crate::names::zip_name(&old.by_index_raw(i)?);
             if name == MANIFEST {
                 continue;
             }
@@ -233,7 +279,10 @@ pub fn update(
             }
             rep.set_current(name);
             zw.start_file(name.as_str(), o)?;
-            let mut r = CountingReader { inner: BufReader::new(File::open(&src.path)?), reporter: &mut rep };
+            let mut r = CountingReader {
+                inner: BufReader::new(File::open(&src.path)?),
+                reporter: &mut rep,
+            };
             packed += std::io::copy(&mut r, &mut zw)?;
         }
         // 4. Manifest.

@@ -33,8 +33,9 @@ export function ProgressOverlay({ t, lang, title, progress, onCancel }: { t: T; 
   );
 }
 
-export function PasswordDialog({ t, name, error, onSubmit, onCancel }: { t: T; name: string; error?: string; onSubmit: (pw: string) => void; onCancel: () => void }) {
+export function PasswordDialog({ t, name, error, onSubmit, onCancel, canRemember = true }: { t: T; name: string; error?: string; onSubmit: (pw: string, remember: boolean) => void; onCancel: () => void; canRemember?: boolean }) {
   const [pw, setPw] = useState("");
+  const [remember, setRemember] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => ref.current?.focus(), [error]);
   return (
@@ -43,7 +44,7 @@ export function PasswordDialog({ t, name, error, onSubmit, onCancel }: { t: T; n
         className="sheet narrow"
         onSubmit={(e) => {
           e.preventDefault();
-          if (pw) onSubmit(pw);
+          if (pw) onSubmit(pw, remember);
         }}
       >
         <div className="dialog-icon"><Icon name="lock" size={22} /></div>
@@ -51,6 +52,12 @@ export function PasswordDialog({ t, name, error, onSubmit, onCancel }: { t: T; n
         <p className="muted">{t("pwSub", { name })}</p>
         <input id="open-pw" ref={ref} type="password" autoComplete="current-password" placeholder={t("password")} value={pw} onChange={(e) => setPw(e.target.value)} />
         {error && <p className="err small">{error}</p>}
+        {canRemember && (
+          <label className="check small" title={t("rememberPwHint")}>
+            <input id="remember-pw" type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            {t("rememberPw")}
+          </label>
+        )}
         <div className="row gap end">
           <button type="button" className="btn quiet" onClick={onCancel}>{t("cancel")}</button>
           <button type="submit" className="btn primary" disabled={!pw}>{t("open")}</button>

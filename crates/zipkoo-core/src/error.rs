@@ -16,7 +16,9 @@ pub enum Error {
     EncryptionNotSupported(&'static str),
     #[error("Blocked an unsafe path inside the archive: {0}")]
     UnsafePath(String),
-    #[error("Stopped: this archive would unpack to more than {limit} bytes. It may be a zip bomb.")]
+    #[error(
+        "Stopped: this archive would unpack to more than {limit} bytes. It may be a zip bomb."
+    )]
     TooLarge { limit: u64 },
     #[error("Not found inside the archive: {0}")]
     EntryNotFound(String),

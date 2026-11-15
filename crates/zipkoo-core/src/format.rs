@@ -72,7 +72,16 @@ impl Format {
 
     /// Read through `formats::walk` (ISO, CAB, LZH, single compressed files).
     pub fn is_simple(self) -> bool {
-        matches!(self, Format::Gz | Format::Xz | Format::Bz2 | Format::Zst | Format::Iso | Format::Cab | Format::Lzh)
+        matches!(
+            self,
+            Format::Gz
+                | Format::Xz
+                | Format::Bz2
+                | Format::Zst
+                | Format::Iso
+                | Format::Cab
+                | Format::Lzh
+        )
     }
 
     pub fn supports_password(self) -> bool {
@@ -154,7 +163,11 @@ impl Format {
                 got == 512 && &block[257..262] == b"ustar"
             })
             .unwrap_or(false);
-        if ok { as_tar } else { single }
+        if ok {
+            as_tar
+        } else {
+            single
+        }
     }
 
     fn is_iso(path: &Path) -> bool {
@@ -172,7 +185,9 @@ impl Format {
     /// Detect by magic bytes first, then by name.
     pub fn detect(path: &Path) -> Option<Format> {
         let mut head = [0u8; 8];
-        let n = File::open(path).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+        let n = File::open(path)
+            .and_then(|mut f| f.read(&mut head))
+            .unwrap_or(0);
         let h = &head[..n];
         let by_magic = if h.starts_with(b"PK\x03\x04") || h.starts_with(b"PK\x05\x06") {
             Some(Format::Zip)
@@ -192,10 +207,16 @@ impl Format {
         } else {
             None
         };
-        let by_name = path.file_name().and_then(|n| n.to_str()).and_then(Format::from_name);
+        let by_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(Format::from_name);
         // Zipkoo's own self-extracting programs carry a ZIP after the stub.
         let sfx = || {
-            File::open(path).ok().and_then(|mut f| crate::sfx::locate_payload(&mut f).ok().flatten()).map(|_| Format::Zip)
+            File::open(path)
+                .ok()
+                .and_then(|mut f| crate::sfx::locate_payload(&mut f).ok().flatten())
+                .map(|_| Format::Zip)
         };
         // Compressed tars: magic only says gzip/zstd/etc, so trust the name for those.
         by_magic.or_else(sfx).or(by_name)

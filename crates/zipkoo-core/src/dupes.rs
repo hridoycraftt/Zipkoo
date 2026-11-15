@@ -36,11 +36,18 @@ fn hash(path: &Path, limit: Option<u64>) -> std::io::Result<[u8; 32]> {
 pub fn find(inputs: &[PathBuf], min_size: u64) -> Result<Vec<DupGroup>> {
     let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
     for input in inputs {
-        for e in walkdir::WalkDir::new(input).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+        for e in walkdir::WalkDir::new(input)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             if e.file_type().is_file() {
                 let size = e.metadata().map(|m| m.len()).unwrap_or(0);
                 if size >= min_size.max(1) {
-                    by_size.entry(size).or_default().push(e.path().to_path_buf());
+                    by_size
+                        .entry(size)
+                        .or_default()
+                        .push(e.path().to_path_buf());
                 }
             }
         }
@@ -67,7 +74,11 @@ pub fn find(inputs: &[PathBuf], min_size: u64) -> Result<Vec<DupGroup>> {
             };
             for mut files in candidates {
                 files.sort();
-                groups.push(DupGroup { size, wasted: size * (files.len() as u64 - 1), files });
+                groups.push(DupGroup {
+                    size,
+                    wasted: size * (files.len() as u64 - 1),
+                    files,
+                });
             }
         }
     }

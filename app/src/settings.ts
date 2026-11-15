@@ -12,6 +12,7 @@ export interface Settings {
   trashAfterExtract: boolean;
   skipPrograms: boolean;
   autoUpdate: boolean;
+  scanAfterExtract: boolean;
 }
 
 export const DEFAULTS: Settings = {
@@ -24,6 +25,7 @@ export const DEFAULTS: Settings = {
   trashAfterExtract: false,
   skipPrograms: true,
   autoUpdate: true,
+  scanAfterExtract: true,
 };
 
 export function loadSettings(): Settings {

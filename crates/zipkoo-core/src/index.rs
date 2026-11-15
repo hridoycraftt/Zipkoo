@@ -31,11 +31,19 @@ fn db_err(e: rusqlite::Error) -> Error {
 
 fn stamp(p: &Path) -> Option<(i64, i64)> {
     let m = std::fs::metadata(p).ok()?;
-    let t = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
+    let t = m
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
     Some((m.len() as i64, t))
 }
 
-const EXTS: &[&str] = &["zip", "zipx", "7z", "rar", "tar", "tgz", "gz", "zst", "tzst", "bz2", "tbz2", "xz", "txz", "iso", "cab", "lzh", "lha"];
+const EXTS: &[&str] = &[
+    "zip", "zipx", "7z", "rar", "tar", "tgz", "gz", "zst", "tzst", "bz2", "tbz2", "xz", "txz",
+    "iso", "cab", "lzh", "lha",
+];
 
 /// Archives under `dir` (not following links). Split parts count once (.001).
 pub fn find_archives(dir: &Path, max_depth: usize) -> Vec<PathBuf> {
@@ -48,7 +56,10 @@ pub fn find_archives(dir: &Path, max_depth: usize) -> Vec<PathBuf> {
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
         .filter(|p| {
-            let n = p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+            let n = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
             n.ends_with(".001") || EXTS.iter().any(|x| n.ends_with(&format!(".{x}")))
         })
         .collect()
@@ -76,10 +87,16 @@ impl Index {
         let mut r = RefreshReport::default();
         for a in archives {
             let key = a.to_string_lossy().into_owned();
-            let Some((size, mtime)) = stamp(a) else { continue };
+            let Some((size, mtime)) = stamp(a) else {
+                continue;
+            };
             let known: Option<(i64, i64)> = self
                 .db
-                .query_row("SELECT size, mtime FROM archives WHERE path=?1", [&key], |row| Ok((row.get(0)?, row.get(1)?)))
+                .query_row(
+                    "SELECT size, mtime FROM archives WHERE path=?1",
+                    [&key],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
                 .ok();
             if known == Some((size, mtime)) {
                 r.unchanged += 1;
@@ -88,13 +105,27 @@ impl Index {
             match crate::inspect::inspect(a, None) {
                 Ok(info) => {
                     let tx = self.db.transaction().map_err(db_err)?;
-                    tx.execute("DELETE FROM archives WHERE path=?1", [&key]).map_err(db_err)?;
-                    tx.execute("INSERT INTO archives(path,size,mtime) VALUES(?1,?2,?3)", params![key, size, mtime]).map_err(db_err)?;
+                    tx.execute("DELETE FROM archives WHERE path=?1", [&key])
+                        .map_err(db_err)?;
+                    tx.execute(
+                        "INSERT INTO archives(path,size,mtime) VALUES(?1,?2,?3)",
+                        params![key, size, mtime],
+                    )
+                    .map_err(db_err)?;
                     let id = tx.last_insert_rowid();
                     {
-                        let mut st = tx.prepare("INSERT INTO entries(archive,name,lname,size) VALUES(?1,?2,?3,?4)").map_err(db_err)?;
-                        for e in info.entries.iter().filter(|e| !e.is_dir && !e.name.starts_with(".zipkoo/")) {
-                            st.execute(params![id, e.name, e.name.to_lowercase(), e.size as i64]).map_err(db_err)?;
+                        let mut st = tx
+                            .prepare(
+                                "INSERT INTO entries(archive,name,lname,size) VALUES(?1,?2,?3,?4)",
+                            )
+                            .map_err(db_err)?;
+                        for e in info
+                            .entries
+                            .iter()
+                            .filter(|e| !e.is_dir && !e.name.starts_with(".zipkoo/"))
+                        {
+                            st.execute(params![id, e.name, e.name.to_lowercase(), e.size as i64])
+                                .map_err(db_err)?;
                         }
                     }
                     tx.commit().map_err(db_err)?;
@@ -109,13 +140,21 @@ impl Index {
     /// Forget archives that no longer exist.
     pub fn prune(&mut self) -> Result<usize> {
         let paths: Vec<String> = {
-            let mut st = self.db.prepare("SELECT path FROM archives").map_err(db_err)?;
-            let rows = st.query_map([], |r| r.get::<_, String>(0)).map_err(db_err)?;
+            let mut st = self
+                .db
+                .prepare("SELECT path FROM archives")
+                .map_err(db_err)?;
+            let rows = st
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(db_err)?;
             rows.filter_map(|r| r.ok()).collect()
         };
         let mut n = 0;
         for p in paths.iter().filter(|p| !Path::new(p).exists()) {
-            n += self.db.execute("DELETE FROM archives WHERE path=?1", [p]).map_err(db_err)?;
+            n += self
+                .db
+                .execute("DELETE FROM archives WHERE path=?1", [p])
+                .map_err(db_err)?;
         }
         Ok(n)
     }
@@ -133,14 +172,26 @@ impl Index {
         sql.push_str(&format!(" ORDER BY length(e.name) LIMIT {limit}"));
         let mut st = self.db.prepare(&sql).map_err(db_err)?;
         let rows = st
-            .query_map(rusqlite::params_from_iter(words.iter()), |r| Ok(Hit { archive: r.get(0)?, name: r.get(1)?, size: r.get::<_, i64>(2)? as u64 }))
+            .query_map(rusqlite::params_from_iter(words.iter()), |r| {
+                Ok(Hit {
+                    archive: r.get(0)?,
+                    name: r.get(1)?,
+                    size: r.get::<_, i64>(2)? as u64,
+                })
+            })
             .map_err(db_err)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     pub fn stats(&self) -> Result<(u64, u64)> {
-        let a: i64 = self.db.query_row("SELECT count(*) FROM archives", [], |r| r.get(0)).map_err(db_err)?;
-        let e: i64 = self.db.query_row("SELECT count(*) FROM entries", [], |r| r.get(0)).map_err(db_err)?;
+        let a: i64 = self
+            .db
+            .query_row("SELECT count(*) FROM archives", [], |r| r.get(0))
+            .map_err(db_err)?;
+        let e: i64 = self
+            .db
+            .query_row("SELECT count(*) FROM entries", [], |r| r.get(0))
+            .map_err(db_err)?;
         Ok((a as u64, e as u64))
     }
 }

@@ -2,9 +2,10 @@
 use std::path::Path;
 
 const PRECOMPRESSED: &[&str] = &[
-    "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif", "mp4", "mov", "mkv", "avi", "webm",
-    "m4v", "mp3", "aac", "m4a", "ogg", "opus", "flac", "zip", "7z", "rar", "gz", "tgz", "bz2", "xz",
-    "zst", "lz4", "br", "docx", "xlsx", "pptx", "odt", "ods", "epub", "jar", "apk", "dmg", "pdf",
+    "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif", "mp4", "mov", "mkv", "avi",
+    "webm", "m4v", "mp3", "aac", "m4a", "ogg", "opus", "flac", "zip", "7z", "rar", "gz", "tgz",
+    "bz2", "xz", "zst", "lz4", "br", "docx", "xlsx", "pptx", "odt", "ods", "epub", "jar", "apk",
+    "dmg", "pdf",
 ];
 
 pub fn is_precompressed(path: &Path) -> bool {
@@ -16,5 +17,7 @@ pub fn is_precompressed(path: &Path) -> bool {
 
 /// Default worker threads: all cores, at least 1.
 pub fn threads() -> u32 {
-    std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(1)
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(1)
 }

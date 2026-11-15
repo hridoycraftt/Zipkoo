@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { appInfo, type AppInfo, type ShellStatus } from "../api";
+import { appInfo, passwordAdd, passwordRemove, passwordsList, asUiError, type AppInfo, type SavedPassword, type ShellStatus } from "../api";
 import type { Lang, makeT } from "../i18n";
 import type { Settings, Theme } from "../settings";
 import { Icon, type IconName } from "./Icon";
@@ -35,6 +35,7 @@ function Toggle({ id, checked, onChange, label, hint }: { id: string; checked: b
 }
 
 export function SettingsView(p: {
+  scanner: string | null;
   t: T;
   lang: Lang;
   setLang: (l: Lang) => void;
@@ -50,8 +51,13 @@ export function SettingsView(p: {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [server, setServer] = useState(p.shareServer);
   const [upd, setUpd] = useState("");
+  const [pws, setPws] = useState<SavedPassword[]>([]);
+  const [newLabel, setNewLabel] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [pwErr, setPwErr] = useState("");
   useEffect(() => {
     appInfo().then(setInfo).catch(() => {});
+    passwordsList().then(setPws).catch(() => {});
   }, []);
 
   return (
@@ -89,6 +95,11 @@ export function SettingsView(p: {
         <Toggle id="set-open" checked={s.openAfterExtract} onChange={(openAfterExtract) => update({ openAfterExtract })} label={t("openAfterLabel")} />
         <Toggle id="set-trash" checked={s.trashAfterExtract} onChange={(trashAfterExtract) => update({ trashAfterExtract })} label={t("trashAfterLabel")} hint={t("trashAfterHint")} />
         <Toggle id="set-skip" checked={s.skipPrograms} onChange={(skipPrograms) => update({ skipPrograms })} label={t("skipProgramsLabel")} />
+        {p.scanner ? (
+          <Toggle id="set-scan" checked={s.scanAfterExtract} onChange={(scanAfterExtract) => update({ scanAfterExtract })} label={t("scanLabel")} hint={t("scanHint", { engine: p.scanner })} />
+        ) : (
+          <div className="set-row"><span className="set-text"><b>{t("scanLabel")}</b><small>{t("scanNone")}</small></span></div>
+        )}
       </section>
 
       {p.shell.supported && (
@@ -108,6 +119,42 @@ export function SettingsView(p: {
           </div>
           <small>{t("serverHint")}</small>
         </label>
+      </section>
+
+      <section className="set-sec" aria-labelledby="sec-pw">
+        <h2 id="sec-pw">{t("secPasswords")}</h2>
+        <p className="set-note">{t("rememberPwHint")}</p>
+        {pws.length === 0 ? (
+          <p className="set-note">{t("noSavedPw")}</p>
+        ) : (
+          <ul className="pw-list">
+            {pws.map((x) => (
+              <li key={x.id} className="set-row">
+                <span className="set-text">
+                  <b><Icon name="lock" size={15} /> {x.label}</b>
+                  <small>{t("savedOn", { when: new Date(x.created * 1000).toLocaleDateString(p.lang === "bn" ? "bn-BD" : undefined, { dateStyle: "medium" }) })}</small>
+                </span>
+                <button className="btn quiet small" onClick={async () => setPws(await passwordRemove(x.id))}>{t("remove")}</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form className="pw-add" onSubmit={async (e) => {
+          e.preventDefault();
+          setPwErr("");
+          try {
+            setPws(await passwordAdd(newLabel.trim() || t("password"), newPw));
+            setNewLabel("");
+            setNewPw("");
+          } catch (err) {
+            setPwErr(asUiError(err).message);
+          }
+        }}>
+          <input id="pw-label" placeholder={t("pwLabelPlaceholder")} aria-label={t("pwLabel")} value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
+          <input id="pw-secret" type="password" autoComplete="new-password" placeholder={t("password")} aria-label={t("password")} value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+          <button className="btn small" type="submit" disabled={!newPw}>{t("addPw")}</button>
+        </form>
+        {pwErr && <p className="err small">{pwErr}</p>}
       </section>
 
       <section className="set-sec" aria-labelledby="sec-upd">

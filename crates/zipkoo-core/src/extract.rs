@@ -80,7 +80,12 @@ impl Ctx<'_, '_, '_> {
         if name.starts_with(crate::update::ZIPKOO_DIR) {
             return self.opts.only.iter().any(|o| name.starts_with(o.as_str()));
         }
-        self.opts.only.is_empty() || self.opts.only.iter().any(|o| o == name || name.starts_with(&format!("{}/", o.trim_end_matches('/'))))
+        self.opts.only.is_empty()
+            || self
+                .opts
+                .only
+                .iter()
+                .any(|o| o == name || name.starts_with(&format!("{}/", o.trim_end_matches('/'))))
     }
 
     /// Decide where an entry goes, or why it is skipped.
@@ -110,7 +115,9 @@ impl Ctx<'_, '_, '_> {
         let out = match safe_join(self.dest, name) {
             Ok(p) => p,
             Err(_) => {
-                self.report.skipped.push((name.into(), "unsafe path".into()));
+                self.report
+                    .skipped
+                    .push((name.into(), "unsafe path".into()));
                 return Ok(None);
             }
         };
@@ -119,7 +126,9 @@ impl Ctx<'_, '_, '_> {
             return Ok(None);
         }
         if !self.opts.allow_executables && is_executable_name(name) {
-            self.report.skipped.push((name.into(), "program blocked".into()));
+            self.report
+                .skipped
+                .push((name.into(), "program blocked".into()));
             return Ok(None);
         }
         let out = if out.exists() {
@@ -127,7 +136,9 @@ impl Ctx<'_, '_, '_> {
                 (true, _) | (_, Conflict::Overwrite) => out,
                 (_, Conflict::Rename) => crate::pack::unique_path(&out),
                 (_, Conflict::Skip) => {
-                    self.report.skipped.push((name.into(), "already exists".into()));
+                    self.report
+                        .skipped
+                        .push((name.into(), "already exists".into()));
                     return Ok(None);
                 }
             }
@@ -174,7 +185,16 @@ pub fn extract(
     let (real, format, archive_size, _guard) = resolve(path)?;
     let declared = match crate::inspect::inspect(path, opts.password) {
         Ok(i) if opts.only.is_empty() => i.total_size,
-        Ok(i) => i.entries.iter().filter(|e| opts.only.iter().any(|o| e.name == *o || e.name.starts_with(&format!("{}/", o.trim_end_matches('/'))))).map(|e| e.size).sum(),
+        Ok(i) => i
+            .entries
+            .iter()
+            .filter(|e| {
+                opts.only.iter().any(|o| {
+                    e.name == *o || e.name.starts_with(&format!("{}/", o.trim_end_matches('/')))
+                })
+            })
+            .map(|e| e.size)
+            .sum(),
         Err(_) => 0,
     };
     let total = declared;
@@ -182,7 +202,10 @@ pub fn extract(
     // Refuse up front when the declared output can't fit (keeps 64 MB of headroom).
     if let Ok(free) = fs4::available_space(dest) {
         if declared > free.saturating_sub(64 << 20) {
-            return Err(Error::NoSpace { need: declared, free });
+            return Err(Error::NoSpace {
+                need: declared,
+                free,
+            });
         }
     }
     let mut rep = Reporter::new(on_progress, cancel, total);
@@ -190,8 +213,17 @@ pub fn extract(
         motw: crate::meta::motw_read(path),
         dest,
         opts,
-        budget: Budget::for_archive(archive_size, opts.max_ratio, opts.floor, declared, opts.hard_cap),
-        report: ExtractReport { dest: dest.to_path_buf(), ..Default::default() },
+        budget: Budget::for_archive(
+            archive_size,
+            opts.max_ratio,
+            opts.floor,
+            declared,
+            opts.hard_cap,
+        ),
+        report: ExtractReport {
+            dest: dest.to_path_buf(),
+            ..Default::default()
+        },
         rep: &mut rep,
     };
 
@@ -201,13 +233,20 @@ pub fn extract(
             for i in 0..z.len() {
                 let (name, is_dir, is_link, encrypted) = {
                     let f = z.by_index_raw(i)?;
-                    (f.name()?.to_string(), f.is_dir(), f.is_symlink(), f.encrypted())
+                    (
+                        crate::names::zip_name(&f),
+                        f.is_dir(),
+                        f.is_symlink(),
+                        f.encrypted(),
+                    )
                 };
                 if is_link {
                     ctx.report.skipped.push((name, "link not followed".into()));
                     continue;
                 }
-                let Some(out) = ctx.target(&name, is_dir)? else { continue };
+                let Some(out) = ctx.target(&name, is_dir)? else {
+                    continue;
+                };
                 if encrypted && opts.password.is_none() {
                     return Err(Error::PasswordRequired);
                 }
@@ -218,7 +257,9 @@ pub fn extract(
                 let mtime = f.last_modified().and_then(crate::meta::from_zip_time);
                 // A wrong AES password fails when the data is read, so map that here.
                 match ctx.write(&out, &mut f) {
-                    Err(Error::Io(e)) if encrypted && e.to_string().to_lowercase().contains("password") => {
+                    Err(Error::Io(e))
+                        if encrypted && e.to_string().to_lowercase().contains("password") =>
+                    {
                         return Err(Error::WrongPassword)
                     }
                     other => other?,
@@ -230,7 +271,10 @@ pub fn extract(
             }
         }
         Format::SevenZ => {
-            let pw = opts.password.map(sevenz_rust2::Password::from).unwrap_or_else(sevenz_rust2::Password::empty);
+            let pw = opts
+                .password
+                .map(sevenz_rust2::Password::from)
+                .unwrap_or_else(sevenz_rust2::Password::empty);
             let mut r = sevenz_rust2::ArchiveReader::open(&real, pw)?;
             let mut err: Option<Error> = None;
             r.for_each_entries(|entry, reader| {
@@ -283,7 +327,9 @@ pub fn extract(
         }
         f if f.is_simple() => {
             crate::formats::walk(&real, f, true, &mut |it| {
-                let Some(out) = ctx.target(&it.name, it.is_dir)? else { return Ok(true) };
+                let Some(out) = ctx.target(&it.name, it.is_dir)? else {
+                    return Ok(true);
+                };
                 if let Some(r) = it.reader {
                     ctx.write(&out, r)?;
                 }
@@ -300,13 +346,22 @@ pub fn extract(
                     ctx.report.skipped.push((name, "link not followed".into()));
                     continue;
                 }
-                if !(kind.is_file() || kind.is_dir() || kind == tar::EntryType::Continuous || kind == tar::EntryType::GNUSparse) {
+                if !(kind.is_file()
+                    || kind.is_dir()
+                    || kind == tar::EntryType::Continuous
+                    || kind == tar::EntryType::GNUSparse)
+                {
                     continue;
                 }
-                let Some(out) = ctx.target(&name, kind.is_dir())? else { continue };
+                let Some(out) = ctx.target(&name, kind.is_dir())? else {
+                    continue;
+                };
                 ctx.write(&out, &mut e)?;
                 if let Ok(m) = e.header().mtime() {
-                    crate::meta::set_mtime(&out, std::time::UNIX_EPOCH + std::time::Duration::from_secs(m));
+                    crate::meta::set_mtime(
+                        &out,
+                        std::time::UNIX_EPOCH + std::time::Duration::from_secs(m),
+                    );
                 }
                 #[cfg(unix)]
                 if let Ok(mode) = e.header().mode() {
@@ -337,34 +392,63 @@ pub struct ExtractTarget {
 
 pub fn suggest_dest(archive: &Path, info: &crate::inspect::ArchiveInfo) -> ExtractTarget {
     let parent = archive.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = archive
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let name = crate::split::strip_part_suffix(&name).to_string();
     let stem = name
         .strip_suffix(&format!(".{}", info.format.extension()))
         .map(str::to_string)
-        .unwrap_or_else(|| Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(name.clone()));
+        .unwrap_or_else(|| {
+            Path::new(&name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or(name.clone())
+        });
     let tops: std::collections::BTreeSet<&str> = info
         .entries
         .iter()
         .filter(|e| !e.name.starts_with(crate::update::ZIPKOO_DIR))
-        .map(|e| e.name.trim_start_matches("./").split('/').next().unwrap_or(""))
+        .map(|e| {
+            e.name
+                .trim_start_matches("./")
+                .split('/')
+                .next()
+                .unwrap_or("")
+        })
         .filter(|s| !s.is_empty())
         .collect();
     let single_folder = tops.len() == 1
-        && info.entries.iter().any(|e| e.name.trim_start_matches("./").contains('/') || e.is_dir);
+        && info
+            .entries
+            .iter()
+            .any(|e| e.name.trim_start_matches("./").contains('/') || e.is_dir);
     if single_folder {
         let top = tops.into_iter().next().unwrap();
         let wanted = parent.join(top);
         if !wanted.exists() {
             // Extract into the parent; the result is parent/top.
-            return ExtractTarget { dest: parent.clone(), result: wanted, strip: None };
+            return ExtractTarget {
+                dest: parent.clone(),
+                result: wanted,
+                strip: None,
+            };
         }
         // "Project" is taken: unpack its contents into "Project (2)" (not "Project (2)/Project").
         let dest = crate::pack::unique_path(&wanted);
-        return ExtractTarget { dest: dest.clone(), result: dest, strip: Some(format!("{top}/")) };
+        return ExtractTarget {
+            dest: dest.clone(),
+            result: dest,
+            strip: Some(format!("{top}/")),
+        };
     }
     let dest = crate::pack::unique_path(&parent.join(&stem));
-    ExtractTarget { dest: dest.clone(), result: dest, strip: None }
+    ExtractTarget {
+        dest: dest.clone(),
+        result: dest,
+        strip: None,
+    }
 }
 
 /// Files this extraction would collide with (existing files at the destination), so the UI can
@@ -377,7 +461,12 @@ pub fn conflicts(path: &Path, dest: &Path, opts: &ExtractOptions) -> Result<Vec<
         if name.starts_with(crate::update::ZIPKOO_DIR) && opts.only.is_empty() {
             continue;
         }
-        if !opts.only.is_empty() && !opts.only.iter().any(|o| name == o || name.starts_with(&format!("{}/", o.trim_end_matches('/')))) {
+        if !opts.only.is_empty()
+            && !opts
+                .only
+                .iter()
+                .any(|o| name == o || name.starts_with(&format!("{}/", o.trim_end_matches('/'))))
+        {
             continue;
         }
         let rel = match &opts.strip {
@@ -412,9 +501,16 @@ impl TestReport {
 
 /// Read every file in the archive and check its checksum (CRC-32 for ZIP/7z/RAR, the zstd/xz
 /// frame checks for compressed TARs) without writing anything.
-pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Progress), cancel: Option<&AtomicBool>) -> Result<TestReport> {
+pub fn test(
+    path: &Path,
+    password: Option<&str>,
+    on_progress: &mut dyn FnMut(&Progress),
+    cancel: Option<&AtomicBool>,
+) -> Result<TestReport> {
     let (real, format, _, _guard) = resolve(path)?;
-    let total = crate::inspect::inspect(path, password).map(|i| i.total_size).unwrap_or(0);
+    let total = crate::inspect::inspect(path, password)
+        .map(|i| i.total_size)
+        .unwrap_or(0);
     let mut rep = Reporter::new(on_progress, cancel, total);
     let mut r = TestReport::default();
     let sink = |rd: &mut dyn std::io::Read, rep: &mut Reporter| -> std::io::Result<u64> {
@@ -435,7 +531,7 @@ pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Pr
             for i in 0..z.len() {
                 let (name, is_dir, enc) = {
                     let f = z.by_index_raw(i)?;
-                    (f.name()?.to_string(), f.is_dir(), f.encrypted())
+                    (crate::names::zip_name(&f), f.is_dir(), f.encrypted())
                 };
                 if is_dir {
                     continue;
@@ -454,16 +550,22 @@ pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Pr
                             r.files += 1;
                             r.bytes += n;
                         }
-                        Err(e) if e.to_string().contains("zipkoo: cancelled") => return Err(Error::Cancelled),
+                        Err(e) if e.to_string().contains("zipkoo: cancelled") => {
+                            return Err(Error::Cancelled)
+                        }
                         Err(e) => r.errors.push((name, e.to_string())),
                     },
-                    Err(zip::result::ZipError::InvalidPassword) => return Err(Error::WrongPassword),
+                    Err(zip::result::ZipError::InvalidPassword) => {
+                        return Err(Error::WrongPassword)
+                    }
                     Err(e) => r.errors.push((name, e.to_string())),
                 }
             }
         }
         Format::SevenZ => {
-            let pw = password.map(sevenz_rust2::Password::from).unwrap_or_else(sevenz_rust2::Password::empty);
+            let pw = password
+                .map(sevenz_rust2::Password::from)
+                .unwrap_or_else(sevenz_rust2::Password::empty);
             let mut ar = sevenz_rust2::ArchiveReader::open(&real, pw)?;
             let mut errors = Vec::new();
             let res = ar.for_each_entries(|entry, reader| {
@@ -487,7 +589,9 @@ pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Pr
             if let Err(e) = res {
                 let e: Error = e.into();
                 match e {
-                    Error::PasswordRequired | Error::WrongPassword | Error::Cancelled => return Err(e),
+                    Error::PasswordRequired | Error::WrongPassword | Error::Cancelled => {
+                        return Err(e)
+                    }
                     other => errors.push(("(archive)".into(), other.to_string())),
                 }
             }
@@ -538,7 +642,9 @@ pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Pr
                             r.files += 1;
                             r.bytes += n;
                         }
-                        Err(e) if e.to_string().contains("zipkoo: cancelled") => return Err(Error::Cancelled),
+                        Err(e) if e.to_string().contains("zipkoo: cancelled") => {
+                            return Err(Error::Cancelled)
+                        }
                         Err(e) => {
                             r.errors.push((it.name.clone(), e.to_string()));
                             return Ok(false);
@@ -574,14 +680,19 @@ pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Pr
                     if !e.header().entry_type().is_file() {
                         continue;
                     }
-                    let name = e.path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                    let name = e
+                        .path()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     rep.set_current(&name);
                     match sink(&mut e, &mut rep) {
                         Ok(n) => {
                             r.files += 1;
                             r.bytes += n;
                         }
-                        Err(err) if err.to_string().contains("zipkoo: cancelled") => return Err(Error::Cancelled),
+                        Err(err) if err.to_string().contains("zipkoo: cancelled") => {
+                            return Err(Error::Cancelled)
+                        }
                         Err(err) => {
                             r.errors.push((name, err.to_string()));
                             break;

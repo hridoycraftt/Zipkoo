@@ -4,7 +4,13 @@ use std::path::{Path, PathBuf};
 use zipkoo_core::*;
 
 fn names(p: &Path) -> Vec<String> {
-    let mut v: Vec<String> = inspect(p, None).unwrap().entries.into_iter().filter(|e| !e.is_dir).map(|e| e.name).collect();
+    let mut v: Vec<String> = inspect(p, None)
+        .unwrap()
+        .entries
+        .into_iter()
+        .filter(|e| !e.is_dir)
+        .map(|e| e.name)
+        .collect();
     v.sort();
     v
 }
@@ -15,7 +21,10 @@ fn roundtrip_single(t: &Path, file: &str, format: Format, data: Vec<u8>) {
     let info = inspect(&p, None).unwrap();
     assert_eq!(info.format, format, "{file}");
     assert_eq!(names(&p), vec!["report.pdf".to_string()], "{file}");
-    assert_eq!(peek(&p, "report.pdf", None, 1 << 20).unwrap(), b"%PDF-1.7 hello");
+    assert_eq!(
+        peek(&p, "report.pdf", None, 1 << 20).unwrap(),
+        b"%PDF-1.7 hello"
+    );
     let d = t.join(format!("out-{file}"));
     extract(&p, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
     assert_eq!(fs::read(d.join("report.pdf")).unwrap(), b"%PDF-1.7 hello");
@@ -34,10 +43,25 @@ fn single_compressed_files() {
     roundtrip_single(t.path(), "report.pdf.xz", Format::Xz, xz.finish().unwrap());
     let mut bz = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::default());
     bz.write_all(&body).unwrap();
-    roundtrip_single(t.path(), "report.pdf.bz2", Format::Bz2, bz.finish().unwrap());
-    roundtrip_single(t.path(), "report.pdf.zst", Format::Zst, zstd::encode_all(&body[..], 3).unwrap());
+    roundtrip_single(
+        t.path(),
+        "report.pdf.bz2",
+        Format::Bz2,
+        bz.finish().unwrap(),
+    );
+    roundtrip_single(
+        t.path(),
+        "report.pdf.zst",
+        Format::Zst,
+        zstd::encode_all(&body[..], 3).unwrap(),
+    );
     // gzip trailer gives the size.
-    assert_eq!(inspect(&t.path().join("report.pdf.gz"), None).unwrap().total_size, body.len() as u64);
+    assert_eq!(
+        inspect(&t.path().join("report.pdf.gz"), None)
+            .unwrap()
+            .total_size,
+        body.len() as u64
+    );
 }
 
 #[test]
@@ -48,7 +72,9 @@ fn tar_inside_plain_gz_is_detected() {
     h.set_size(5);
     h.set_mode(0o644);
     h.set_cksum();
-    tarball.append_data(&mut h, "inside/a.txt", &b"hello"[..]).unwrap();
+    tarball
+        .append_data(&mut h, "inside/a.txt", &b"hello"[..])
+        .unwrap();
     let raw = tarball.into_inner().unwrap();
     let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gz.write_all(&raw).unwrap();
@@ -76,18 +102,30 @@ fn zipx_opens_as_zip() {
 #[test]
 fn iso_with_joliet_names() {
     let t = tempfile::tempdir().unwrap();
-    let gz = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/sample.iso.gz")).unwrap();
+    let gz =
+        fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/sample.iso.gz")).unwrap();
     let mut iso = Vec::new();
-    flate2::read::GzDecoder::new(&gz[..]).read_to_end(&mut iso).unwrap();
+    flate2::read::GzDecoder::new(&gz[..])
+        .read_to_end(&mut iso)
+        .unwrap();
     let p = t.path().join("disc.iso");
     fs::write(&p, iso).unwrap();
     let info = inspect(&p, None).unwrap();
     assert_eq!(info.format, Format::Iso);
-    assert_eq!(names(&p), vec!["Docs/Deep/inner.txt", "Read Me Long Name.txt"]);
-    assert_eq!(peek(&p, "Read Me Long Name.txt", None, 1000).unwrap(), b"hello from iso\n");
+    assert_eq!(
+        names(&p),
+        vec!["Docs/Deep/inner.txt", "Read Me Long Name.txt"]
+    );
+    assert_eq!(
+        peek(&p, "Read Me Long Name.txt", None, 1000).unwrap(),
+        b"hello from iso\n"
+    );
     let d = t.path().join("out");
     extract(&p, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
-    assert_eq!(fs::read(d.join("Docs/Deep/inner.txt")).unwrap(), b"deep file\n");
+    assert_eq!(
+        fs::read(d.join("Docs/Deep/inner.txt")).unwrap(),
+        b"deep file\n"
+    );
     assert!(test(&p, None, &mut |_| {}, None).unwrap().ok());
 }
 
@@ -120,7 +158,11 @@ fn crc16(data: &[u8]) -> u16 {
     for &b in data {
         crc ^= b as u16;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xA001 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xA001
+            } else {
+                crc >> 1
+            };
         }
     }
     crc
@@ -154,7 +196,14 @@ fn lzh(files: &[(&str, &[u8])]) -> Vec<u8> {
 fn lzh_files() {
     let t = tempfile::tempdir().unwrap();
     let p = t.path().join("old.lzh");
-    fs::write(&p, lzh(&[("GAME\\README.TXT", b"retro"), ("GAME\\RUN.BAT", b"@echo off")])).unwrap();
+    fs::write(
+        &p,
+        lzh(&[
+            ("GAME\\README.TXT", b"retro"),
+            ("GAME\\RUN.BAT", b"@echo off"),
+        ]),
+    )
+    .unwrap();
     assert_eq!(inspect(&p, None).unwrap().format, Format::Lzh);
     assert_eq!(names(&p), vec!["GAME/README.TXT", "GAME/RUN.BAT"]);
     assert_eq!(peek(&p, "GAME/README.TXT", None, 100).unwrap(), b"retro");
@@ -169,6 +218,12 @@ fn rar_parts_open_from_any_volume() {
     }
     let first = zipkoo_core::inspect::rar_first_volume(&t.path().join("Movie.part03.rar"));
     assert_eq!(first, Some(t.path().join("Movie.part01.rar")));
-    assert_eq!(zipkoo_core::inspect::rar_first_volume(&t.path().join("Movie.part01.rar")), None);
-    assert_eq!(zipkoo_core::inspect::rar_first_volume(&PathBuf::from("/x/plain.rar")), None);
+    assert_eq!(
+        zipkoo_core::inspect::rar_first_volume(&t.path().join("Movie.part01.rar")),
+        None
+    );
+    assert_eq!(
+        zipkoo_core::inspect::rar_first_volume(&PathBuf::from("/x/plain.rar")),
+        None
+    );
 }

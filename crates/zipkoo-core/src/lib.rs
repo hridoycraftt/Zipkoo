@@ -18,18 +18,24 @@ pub mod index;
 pub mod inspect;
 pub(crate) mod iso;
 pub mod meta;
+pub mod names;
 pub mod optimize;
 pub mod pack;
 pub mod progress;
 pub mod safety;
-pub mod share;
+pub mod salvage;
+pub mod scan;
 pub mod sfx;
+pub mod share;
 pub mod smart;
 pub mod split;
 pub mod update;
 
 pub use error::{Error, Result};
-pub use extract::{conflicts, extract, suggest_dest, test, Conflict, ExtractOptions, ExtractReport, ExtractTarget, TestReport};
+pub use extract::{
+    conflicts, extract, suggest_dest, test, Conflict, ExtractOptions, ExtractReport, ExtractTarget,
+    TestReport,
+};
 pub use format::Format;
 pub use inspect::{inspect, peek, ArchiveInfo, Entry};
 pub use pack::{pack, unique_path, Level, PackOptions, PackReport};

@@ -10,19 +10,38 @@ pub struct Item {
 }
 
 pub const FILE_ITEMS: &[Item] = &[
-    Item { id: "zip-here", label: "Zip here" },
-    Item { id: "lock", label: "Zip and lock with a password…" },
-    Item { id: "add", label: "Add to archive…" },
-    Item { id: "sfx", label: "Make a self-extracting .exe…" },
+    Item {
+        id: "zip-here",
+        label: "Zip here",
+    },
+    Item {
+        id: "lock",
+        label: "Zip and lock with a password…",
+    },
+    Item {
+        id: "add",
+        label: "Add to archive…",
+    },
+    Item {
+        id: "sfx",
+        label: "Make a self-extracting .exe…",
+    },
 ];
 
 pub const ARCHIVE_ITEMS: &[Item] = &[
-    Item { id: "extract-here", label: "Extract here" },
-    Item { id: "open", label: "Open in Zipkoo" },
+    Item {
+        id: "extract-here",
+        label: "Extract here",
+    },
+    Item {
+        id: "open",
+        label: "Open in Zipkoo",
+    },
 ];
 
 pub const ARCHIVE_EXTS: &[&str] = &[
-    "zip", "zipx", "7z", "rar", "tar", "gz", "tgz", "zst", "tzst", "bz2", "tbz2", "xz", "txz", "001", "iso", "cab", "lzh", "lha",
+    "zip", "zipx", "7z", "rar", "tar", "gz", "tgz", "zst", "tzst", "bz2", "tbz2", "xz", "txz",
+    "001", "iso", "cab", "lzh", "lha",
 ];
 
 pub fn is_installed() -> bool {
@@ -51,7 +70,13 @@ mod imp {
 
     const ROOT: &str = r"Software\Classes";
 
-    fn verb(classes: &RegKey, base: &str, title: &str, exe: &Path, items: &[Item]) -> std::io::Result<()> {
+    fn verb(
+        classes: &RegKey,
+        base: &str,
+        title: &str,
+        exe: &Path,
+        items: &[Item],
+    ) -> std::io::Result<()> {
         let (k, _) = classes.create_subkey(base)?;
         k.set_value("MUIVerb", &title)?;
         k.set_value("Icon", &format!("\"{}\",0", exe.display()))?;
@@ -62,7 +87,10 @@ mod imp {
             let (sub, _) = k.create_subkey(format!(r"shell\{:02}{}", i + 1, it.id))?;
             sub.set_value("MUIVerb", &it.label)?;
             let (cmd, _) = sub.create_subkey("command")?;
-            cmd.set_value("", &format!("\"{}\" --action {} \"%1\"", exe.display(), it.id))?;
+            cmd.set_value(
+                "",
+                &format!("\"{}\" --action {} \"%1\"", exe.display(), it.id),
+            )?;
         }
         Ok(())
     }
@@ -71,9 +99,21 @@ mod imp {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let (classes, _) = hkcu.create_subkey(ROOT)?;
         verb(&classes, r"*\shell\Zipkoo", "Zipkoo", exe, FILE_ITEMS)?;
-        verb(&classes, r"Directory\shell\Zipkoo", "Zipkoo", exe, FILE_ITEMS)?;
+        verb(
+            &classes,
+            r"Directory\shell\Zipkoo",
+            "Zipkoo",
+            exe,
+            FILE_ITEMS,
+        )?;
         for ext in ARCHIVE_EXTS {
-            verb(&classes, &format!(r"SystemFileAssociations\.{ext}\shell\ZipkooExtract"), "Extract with Zipkoo", exe, ARCHIVE_ITEMS)?;
+            verb(
+                &classes,
+                &format!(r"SystemFileAssociations\.{ext}\shell\ZipkooExtract"),
+                "Extract with Zipkoo",
+                exe,
+                ARCHIVE_ITEMS,
+            )?;
         }
         notify();
         Ok(())
@@ -85,21 +125,30 @@ mod imp {
         let _ = classes.delete_subkey_all(r"*\shell\Zipkoo");
         let _ = classes.delete_subkey_all(r"Directory\shell\Zipkoo");
         for ext in ARCHIVE_EXTS {
-            let _ = classes.delete_subkey_all(format!(r"SystemFileAssociations\.{ext}\shell\ZipkooExtract"));
+            let _ = classes.delete_subkey_all(format!(
+                r"SystemFileAssociations\.{ext}\shell\ZipkooExtract"
+            ));
         }
         notify();
         Ok(())
     }
 
     pub fn is_installed() -> bool {
-        RegKey::predef(HKEY_CURRENT_USER).open_subkey(format!(r"{ROOT}\*\shell\Zipkoo")).is_ok()
+        RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(format!(r"{ROOT}\*\shell\Zipkoo"))
+            .is_ok()
     }
 
     /// Ask Explorer to refresh its menus.
     fn notify() {
         #[link(name = "shell32")]
         extern "system" {
-            fn SHChangeNotify(event: i32, flags: u32, a: *const core::ffi::c_void, b: *const core::ffi::c_void);
+            fn SHChangeNotify(
+                event: i32,
+                flags: u32,
+                a: *const core::ffi::c_void,
+                b: *const core::ffi::c_void,
+            );
         }
         const SHCNE_ASSOCCHANGED: i32 = 0x0800_0000;
         unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, 0, core::ptr::null(), core::ptr::null()) };
@@ -119,12 +168,15 @@ mod imp {
     ];
 
     fn services_dir() -> std::io::Result<PathBuf> {
-        let home = std::env::var_os("HOME").ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set"))?;
+        let home = std::env::var_os("HOME")
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set"))?;
         Ok(PathBuf::from(home).join("Library/Services"))
     }
 
     fn esc(s: &str) -> String {
-        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 
     fn info_plist(title: &str) -> String {
@@ -208,7 +260,9 @@ mod imp {
             let cmd = format!("'{quoted}' --action {id} \"$@\" >/dev/null 2>&1 &");
             fs::write(wf.join("document.wflow"), document_wflow(&cmd))?;
         }
-        let _ = std::process::Command::new("/System/Library/CoreServices/pbs").arg("-update").status();
+        let _ = std::process::Command::new("/System/Library/CoreServices/pbs")
+            .arg("-update")
+            .status();
         Ok(())
     }
 
@@ -217,12 +271,16 @@ mod imp {
         for (_, title, _) in MAC_ITEMS {
             let _ = fs::remove_dir_all(workflow_path(&dir, title));
         }
-        let _ = std::process::Command::new("/System/Library/CoreServices/pbs").arg("-update").status();
+        let _ = std::process::Command::new("/System/Library/CoreServices/pbs")
+            .arg("-update")
+            .status();
         Ok(())
     }
 
     pub fn is_installed() -> bool {
-        services_dir().map(|d| workflow_path(&d, MAC_ITEMS[0].1).exists()).unwrap_or(false)
+        services_dir()
+            .map(|d| workflow_path(&d, MAC_ITEMS[0].1).exists())
+            .unwrap_or(false)
     }
 }
 
@@ -230,7 +288,10 @@ mod imp {
 mod imp {
     use std::path::Path;
     pub fn install(_exe: &Path) -> std::io::Result<()> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "The right-click menu is available on Windows and macOS."))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "The right-click menu is available on Windows and macOS.",
+        ))
     }
     pub fn uninstall() -> std::io::Result<()> {
         Ok(())
@@ -268,9 +329,15 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Option<ShellAction
     let action = action.unwrap_or_else(|| {
         let archive = paths.len() == 1 && {
             let lower = paths[0].to_ascii_lowercase();
-            ARCHIVE_EXTS.iter().any(|e| lower.ends_with(&format!(".{e}")))
+            ARCHIVE_EXTS
+                .iter()
+                .any(|e| lower.ends_with(&format!(".{e}")))
         };
-        if archive { "open".into() } else { "add".into() }
+        if archive {
+            "open".into()
+        } else {
+            "add".into()
+        }
     });
     Some(ShellAction { action, paths })
 }
@@ -289,7 +356,10 @@ impl Inbox {
         let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         let now = std::time::Instant::now();
         if let Some((last, at)) = q.last_mut() {
-            if last.action == a.action && a.action != "open" && now.duration_since(*at) < MERGE_WINDOW {
+            if last.action == a.action
+                && a.action != "open"
+                && now.duration_since(*at) < MERGE_WINDOW
+            {
                 for p in a.paths {
                     if !last.paths.contains(&p) {
                         last.paths.push(p);
@@ -306,7 +376,9 @@ impl Inbox {
     pub fn take_ready(&self) -> Vec<ShellAction> {
         let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         let now = std::time::Instant::now();
-        let (ready, wait): (Vec<_>, Vec<_>) = q.drain(..).partition(|(_, at)| now.duration_since(*at) >= MERGE_WINDOW);
+        let (ready, wait): (Vec<_>, Vec<_>) = q
+            .drain(..)
+            .partition(|(_, at)| now.duration_since(*at) >= MERGE_WINDOW);
         *q = wait;
         ready.into_iter().map(|(a, _)| a).collect()
     }
@@ -322,9 +394,18 @@ mod tests {
 
     #[test]
     fn parses_menu_and_association_launches() {
-        assert_eq!(parse_args(s(&["--action", "zip-here", "C:\\a.txt"])).unwrap(), ShellAction { action: "zip-here".into(), paths: s(&["C:\\a.txt"]) });
+        assert_eq!(
+            parse_args(s(&["--action", "zip-here", "C:\\a.txt"])).unwrap(),
+            ShellAction {
+                action: "zip-here".into(),
+                paths: s(&["C:\\a.txt"])
+            }
+        );
         assert_eq!(parse_args(s(&["/x/Photos.7z"])).unwrap().action, "open");
-        assert_eq!(parse_args(s(&["/x/a.jpg", "/x/b.jpg"])).unwrap().action, "add");
+        assert_eq!(
+            parse_args(s(&["/x/a.jpg", "/x/b.jpg"])).unwrap().action,
+            "add"
+        );
         assert_eq!(parse_args(s(&["-psn_0_123"])), None);
         assert_eq!(parse_args(s(&[])), None);
     }
@@ -332,9 +413,18 @@ mod tests {
     #[test]
     fn merges_quick_clicks() {
         let inbox = Inbox::default();
-        inbox.push(ShellAction { action: "zip-here".into(), paths: s(&["a"]) });
-        inbox.push(ShellAction { action: "zip-here".into(), paths: s(&["b", "a"]) });
-        inbox.push(ShellAction { action: "extract-here".into(), paths: s(&["c.zip"]) });
+        inbox.push(ShellAction {
+            action: "zip-here".into(),
+            paths: s(&["a"]),
+        });
+        inbox.push(ShellAction {
+            action: "zip-here".into(),
+            paths: s(&["b", "a"]),
+        });
+        inbox.push(ShellAction {
+            action: "extract-here".into(),
+            paths: s(&["c.zip"]),
+        });
         assert!(inbox.take_ready().is_empty());
         std::thread::sleep(MERGE_WINDOW + std::time::Duration::from_millis(50));
         let ready = inbox.take_ready();

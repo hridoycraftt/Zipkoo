@@ -500,3 +500,10 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
 .toggle-row .switch { flex: none; }
 .set-sec .field { padding: 10px 0; }
 .seg button { display: inline-flex; align-items: center; gap: 6px; }
+
+.set-note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 2px 0 8px; max-width: 62ch; }
+.pw-list { list-style: none; margin: 0; padding: 0; }
+.pw-list .set-text b { display: inline-flex; align-items: center; gap: 6px; }
+.pw-add { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; padding: 10px 0 4px; }
+.pw-add input { height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--hair-strong); background: var(--pane); min-width: 0; user-select: text; }
+.pw-add input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 4px rgb(23 120 106 / 0.12); }

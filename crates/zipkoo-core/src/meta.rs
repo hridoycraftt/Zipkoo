@@ -41,7 +41,9 @@ pub fn motw_read(archive: &Path) -> Option<Vec<u8>> {
     let data = std::fs::read(std::path::PathBuf::from(s)).ok()?;
     // Only zones 3 (Internet) and 4 (Restricted) matter.
     let text = String::from_utf8_lossy(&data);
-    text.lines().any(|l| matches!(l.trim(), "ZoneId=3" | "ZoneId=4")).then_some(data)
+    text.lines()
+        .any(|l| matches!(l.trim(), "ZoneId=3" | "ZoneId=4"))
+        .then_some(data)
 }
 
 #[cfg(not(windows))]

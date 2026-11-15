@@ -21,13 +21,25 @@ pub enum Level {
 
 impl Level {
     fn deflate(self) -> i64 {
-        match self { Level::Fast => 1, Level::Normal => 6, Level::Max => 9 }
+        match self {
+            Level::Fast => 1,
+            Level::Normal => 6,
+            Level::Max => 9,
+        }
     }
     fn lzma(self) -> u32 {
-        match self { Level::Fast => 1, Level::Normal => 6, Level::Max => 9 }
+        match self {
+            Level::Fast => 1,
+            Level::Normal => 6,
+            Level::Max => 9,
+        }
     }
     fn zstd(self) -> i32 {
-        match self { Level::Fast => 1, Level::Normal => 6, Level::Max => 19 }
+        match self {
+            Level::Fast => 1,
+            Level::Normal => 6,
+            Level::Max => 19,
+        }
     }
 }
 
@@ -47,7 +59,15 @@ pub struct PackOptions {
 
 impl Default for PackOptions {
     fn default() -> Self {
-        Self { format: Format::Zip, level: Level::Normal, smart: true, password: None, hide_names: false, split_size: None, threads: threads() }
+        Self {
+            format: Format::Zip,
+            level: Level::Normal,
+            smart: true,
+            password: None,
+            hide_names: false,
+            split_size: None,
+            threads: threads(),
+        }
     }
 }
 
@@ -86,7 +106,11 @@ fn collect(inputs: &[PathBuf]) -> Result<Vec<Item>> {
                 src: e.path().to_path_buf(),
                 name,
                 is_dir: ft.is_dir(),
-                size: if ft.is_file() { e.metadata().map(|m| m.len()).unwrap_or(0) } else { 0 },
+                size: if ft.is_file() {
+                    e.metadata().map(|m| m.len()).unwrap_or(0)
+                } else {
+                    0
+                },
             });
         }
     }
@@ -116,7 +140,10 @@ pub fn pack(
     let input_bytes: u64 = items.iter().map(|i| i.size).sum();
     let mut rep = Reporter::new(on_progress, cancel, input_bytes);
     // Write to a temp name first so a cancelled job never leaves a half archive behind.
-    let tmp = output.with_extension(format!("{}.part", output.extension().and_then(|e| e.to_str()).unwrap_or("tmp")));
+    let tmp = output.with_extension(format!(
+        "{}.part",
+        output.extension().and_then(|e| e.to_str()).unwrap_or("tmp")
+    ));
     let res = write_archive(&items, &tmp, opts, &mut rep);
     let stored_as_is = match res {
         Ok(n) => n,
@@ -132,7 +159,13 @@ pub fn pack(
         Some(s) => crate::split::split_file(output, s)?,
         None => vec![output.to_path_buf()],
     };
-    Ok(PackReport { outputs, files: items.iter().filter(|i| !i.is_dir).count(), input_bytes, output_bytes, stored_as_is })
+    Ok(PackReport {
+        outputs,
+        files: items.iter().filter(|i| !i.is_dir).count(),
+        input_bytes,
+        output_bytes,
+        stored_as_is,
+    })
 }
 
 fn map_cancel(e: Error) -> Error {
@@ -143,7 +176,12 @@ fn map_cancel(e: Error) -> Error {
     }
 }
 
-fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Reporter) -> Result<usize> {
+fn write_archive(
+    items: &[Item],
+    out: &Path,
+    opts: &PackOptions,
+    rep: &mut Reporter,
+) -> Result<usize> {
     let mut stored = 0;
     match opts.format {
         Format::Zip => {
@@ -164,10 +202,16 @@ fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Repor
                     stored += 1;
                     o = o.compression_method(CompressionMethod::Stored);
                 } else {
-                    o = o.compression_method(CompressionMethod::Deflated).compression_level(Some(opts.level.deflate()));
+                    o = o
+                        .compression_method(CompressionMethod::Deflated)
+                        .compression_level(Some(opts.level.deflate()));
                 }
                 o = o.large_file(it.size >= u32::MAX as u64);
-                if let Some(t) = fs::metadata(&it.src).ok().and_then(|m| m.modified().ok()).and_then(crate::meta::zip_time) {
+                if let Some(t) = fs::metadata(&it.src)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(crate::meta::zip_time)
+                {
                     o = o.last_modified_time(t);
                 }
                 #[cfg(unix)]
@@ -179,15 +223,24 @@ fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Repor
                 }
                 rep.set_current(&it.name);
                 zw.start_file(it.name.as_str(), o)?;
-                let mut r = CountingReader { inner: BufReader::new(File::open(&it.src)?), reporter: rep };
+                let mut r = CountingReader {
+                    inner: BufReader::new(File::open(&it.src)?),
+                    reporter: rep,
+                };
                 std::io::copy(&mut r, &mut zw)?;
             }
             zw.finish()?.flush()?;
         }
         Format::SevenZ => {
-            use sevenz_rust2::{encoder_options::{AesEncoderOptions, Lzma2Options}, ArchiveEntry, ArchiveWriter, EncoderMethod, Password};
+            use sevenz_rust2::{
+                encoder_options::{AesEncoderOptions, Lzma2Options},
+                ArchiveEntry, ArchiveWriter, EncoderMethod, Password,
+            };
             let mut w = ArchiveWriter::create(out)?;
-            let aes = opts.password.as_deref().map(|p| AesEncoderOptions::new(Password::from(p)));
+            let aes = opts
+                .password
+                .as_deref()
+                .map(|p| AesEncoderOptions::new(Password::from(p)));
             if aes.is_some() && opts.hide_names {
                 w.set_encrypt_header(true);
             }
@@ -206,10 +259,17 @@ fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Repor
                 if let Some(a) = &aes {
                     methods.push(a.clone().into());
                 }
-                methods.push(if store { EncoderMethod::COPY.into() } else { lz.clone().into() });
+                methods.push(if store {
+                    EncoderMethod::COPY.into()
+                } else {
+                    lz.clone().into()
+                });
                 w.set_content_methods(methods);
                 rep.set_current(&it.name);
-                let r = CountingReader { inner: BufReader::new(File::open(&it.src)?), reporter: &mut *rep };
+                let r = CountingReader {
+                    inner: BufReader::new(File::open(&it.src)?),
+                    reporter: &mut *rep,
+                };
                 w.push_archive_entry(entry, Some(r))?;
             }
             w.finish()?;
@@ -234,8 +294,14 @@ fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Repor
                 // The header promises `size` bytes. If the file grows or shrinks while we read it,
                 // write exactly that many (cut or zero-padded) so later entries stay intact.
                 let size = meta.len();
-                let exact = std::io::Read::take(std::io::Read::chain(std::io::Read::take(file, size), std::io::repeat(0)), size);
-                let mut r = CountingReader { inner: exact, reporter: rep };
+                let exact = std::io::Read::take(
+                    std::io::Read::chain(std::io::Read::take(file, size), std::io::repeat(0)),
+                    size,
+                );
+                let mut r = CountingReader {
+                    inner: exact,
+                    reporter: rep,
+                };
                 tb.append_data(&mut header, &it.name, &mut r)?;
             }
             let enc = tb.into_inner()?;
@@ -252,7 +318,10 @@ pub fn unique_path(path: &Path) -> PathBuf {
         return path.to_path_buf();
     }
     let parent = path.parent().unwrap_or(Path::new(""));
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let (stem, ext) = match name.find(".tar.") {
         Some(i) => (name[..i].to_string(), name[i..].to_string()),
         None => match name.rfind('.') {

@@ -53,10 +53,18 @@ pub fn rar_first_volume(path: &Path) -> Option<PathBuf> {
     let stem = lower.strip_suffix(".rar")?;
     let idx = stem.rfind(".part")?;
     let digits = &stem[idx + 5..];
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || digits.trim_start_matches('0') == "1" {
+    if digits.is_empty()
+        || !digits.bytes().all(|b| b.is_ascii_digit())
+        || digits.trim_start_matches('0') == "1"
+    {
         return None;
     }
-    let first = format!("{}{:0width$}.rar", &name[..idx + 5], 1, width = digits.len());
+    let first = format!(
+        "{}{:0width$}.rar",
+        &name[..idx + 5],
+        1,
+        width = digits.len()
+    );
     let p = path.with_file_name(first);
     p.exists().then_some(p)
 }
@@ -126,7 +134,7 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
             for i in 0..z.len() {
                 let f = z.by_index_raw(i)?;
                 entries.push(Entry {
-                    name: f.name()?.to_string(),
+                    name: crate::names::zip_name(&f),
                     size: f.size(),
                     packed: Some(f.compressed_size()),
                     is_dir: f.is_dir(),
@@ -136,9 +144,15 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
             }
         }
         Format::SevenZ => {
-            let pw = password.map(sevenz_rust2::Password::from).unwrap_or_else(sevenz_rust2::Password::empty);
+            let pw = password
+                .map(sevenz_rust2::Password::from)
+                .unwrap_or_else(sevenz_rust2::Password::empty);
             let a = sevenz_rust2::Archive::open_with_password(&real, &pw)?;
-            let encrypted = a.blocks.iter().any(|b| b.coders.iter().any(|c| c.encoder_method_id() == sevenz_rust2::EncoderMethod::ID_AES256_SHA256));
+            let encrypted = a.blocks.iter().any(|b| {
+                b.coders
+                    .iter()
+                    .any(|c| c.encoder_method_id() == sevenz_rust2::EncoderMethod::ID_AES256_SHA256)
+            });
             for e in &a.files {
                 entries.push(Entry {
                     name: e.name.clone(),
@@ -170,7 +184,14 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
         }
         f if f.is_simple() => {
             crate::formats::walk(&real, f, false, &mut |it| {
-                entries.push(Entry { name: it.name, size: it.size, packed: None, is_dir: it.is_dir, encrypted: false, executable: false });
+                entries.push(Entry {
+                    name: it.name,
+                    size: it.size,
+                    packed: None,
+                    is_dir: it.is_dir,
+                    encrypted: false,
+                    executable: false,
+                });
                 Ok(true)
             })?;
         }
@@ -185,7 +206,10 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
                     packed: None,
                     is_dir: h.entry_type().is_dir(),
                     encrypted: false,
-                    executable: h.mode().map(|m| m & 0o111 != 0 && !h.entry_type().is_dir()).unwrap_or(false),
+                    executable: h
+                        .mode()
+                        .map(|m| m & 0o111 != 0 && !h.entry_type().is_dir())
+                        .unwrap_or(false),
                 });
             }
         }
@@ -197,8 +221,21 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
     let total_size = entries.iter().filter(user).map(|e| e.size).sum();
     let file_count = entries.iter().filter(user).filter(|e| !e.is_dir).count();
     let encrypted = entries.iter().any(|e| e.encrypted);
-    let executables = entries.iter().filter(|e| e.executable).map(|e| e.name.clone()).collect();
-    Ok(ArchiveInfo { path: path.to_path_buf(), format, archive_size, total_size, file_count, encrypted, executables, entries })
+    let executables = entries
+        .iter()
+        .filter(|e| e.executable)
+        .map(|e| e.name.clone())
+        .collect();
+    Ok(ArchiveInfo {
+        path: path.to_path_buf(),
+        format,
+        archive_size,
+        total_size,
+        file_count,
+        encrypted,
+        executables,
+        entries,
+    })
 }
 
 /// Read one file from the archive into memory (for previews). Refuses files over `max_bytes`.
@@ -208,7 +245,16 @@ pub fn peek(path: &Path, name: &str, password: Option<&str>, max_bytes: u64) -> 
     match format {
         Format::Zip => {
             let mut z = open_zip(&real)?;
-            let idx = z.index_for_name(name).ok_or_else(|| Error::EntryNotFound(name.into()))?;
+            let idx = match z.index_for_name(name) {
+                Some(i) => i,
+                None => (0..z.len())
+                    .find(|&i| {
+                        z.by_index_raw(i)
+                            .map(|f| crate::names::zip_name(&f) == name)
+                            .unwrap_or(false)
+                    })
+                    .ok_or_else(|| Error::EntryNotFound(name.into()))?,
+            };
             let mut f = match password {
                 Some(pw) => z.by_index_decrypt(idx, pw.as_bytes())?,
                 None => z.by_index(idx)?,
@@ -224,9 +270,16 @@ pub fn peek(path: &Path, name: &str, password: Option<&str>, max_bytes: u64) -> 
             Ok(out)
         }
         Format::SevenZ => {
-            let pw = password.map(sevenz_rust2::Password::from).unwrap_or_else(sevenz_rust2::Password::empty);
+            let pw = password
+                .map(sevenz_rust2::Password::from)
+                .unwrap_or_else(sevenz_rust2::Password::empty);
             let mut r = sevenz_rust2::ArchiveReader::open(&real, pw)?;
-            let entry = r.archive().files.iter().find(|e| e.name == name).ok_or_else(|| Error::EntryNotFound(name.into()))?;
+            let entry = r
+                .archive()
+                .files
+                .iter()
+                .find(|e| e.name == name)
+                .ok_or_else(|| Error::EntryNotFound(name.into()))?;
             if entry.size > max_bytes {
                 return Err(too_big());
             }
@@ -261,7 +314,11 @@ pub fn peek(path: &Path, name: &str, password: Option<&str>, max_bytes: u64) -> 
                 if let Some(r) = it.reader {
                     r.take(max_bytes + 1).read_to_end(&mut out)?;
                 }
-                found = Some(if out.len() as u64 > max_bytes { Err(too_big()) } else { Ok(out) });
+                found = Some(if out.len() as u64 > max_bytes {
+                    Err(too_big())
+                } else {
+                    Ok(out)
+                });
                 Ok(false)
             })?;
             found.unwrap_or_else(|| Err(Error::EntryNotFound(name.into())))
@@ -281,5 +338,70 @@ pub fn peek(path: &Path, name: &str, password: Option<&str>, max_bytes: u64) -> 
             }
             Err(Error::EntryNotFound(name.into()))
         }
+    }
+}
+
+/// Does `password` open this archive? Checks without writing anything: ZIP verifies the key and
+/// reads one entry; 7z and RAR decode the first file. Formats without passwords always say yes.
+pub fn password_ok(path: &Path, password: &str) -> Result<bool> {
+    let (real, format, _, _guard) = resolve(path)?;
+    match format {
+        Format::Zip => match check_zip_password(&real, password) {
+            Ok(()) => Ok(true),
+            Err(Error::WrongPassword) => Ok(false),
+            Err(e) => Err(e),
+        },
+        Format::SevenZ => {
+            let mut r = match sevenz_rust2::ArchiveReader::open(
+                &real,
+                sevenz_rust2::Password::from(password),
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    return match Error::from(e) {
+                        Error::WrongPassword | Error::PasswordRequired | Error::Damaged(_) => {
+                            Ok(false)
+                        }
+                        other => Err(other),
+                    }
+                }
+            };
+            let mut ok = true;
+            let res = r.for_each_entries(|entry, reader| {
+                if entry.is_directory || !entry.has_stream {
+                    return Ok(true);
+                }
+                if std::io::copy(&mut reader.take(1 << 20), &mut std::io::sink()).is_err() {
+                    ok = false;
+                }
+                Ok(false)
+            });
+            Ok(ok && res.is_ok())
+        }
+        Format::Rar => {
+            let a = unrar::Archive::with_password(&real, password)
+                .open_for_processing()
+                .map_err(Error::from);
+            let a = match a {
+                Ok(a) => a,
+                Err(Error::WrongPassword) | Err(Error::PasswordRequired) => return Ok(false),
+                Err(e) => return Err(e),
+            };
+            let mut a = a;
+            loop {
+                match a.read_header() {
+                    Ok(Some(h)) if h.entry().is_file() => return Ok(h.test().is_ok()),
+                    Ok(Some(h)) => a = h.skip()?,
+                    Ok(None) => return Ok(true),
+                    Err(e) => {
+                        return match Error::from(e) {
+                            Error::WrongPassword | Error::PasswordRequired => Ok(false),
+                            other => Err(other),
+                        }
+                    }
+                }
+            }
+        }
+        _ => Ok(true),
     }
 }

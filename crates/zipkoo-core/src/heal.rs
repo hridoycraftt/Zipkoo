@@ -39,7 +39,13 @@ impl Layout {
         let k = K.min(blocks as usize).max(1);
         let m = (k * percent).div_ceil(100).max(1);
         let groups = blocks.div_ceil(k as u64);
-        Self { file_size, block, k, m, groups }
+        Self {
+            file_size,
+            block,
+            k,
+            m,
+            groups,
+        }
     }
     fn blocks(&self) -> u64 {
         self.groups * self.k as u64
@@ -96,7 +102,12 @@ pub struct RecoveryReport {
 }
 
 /// Write `archive.zkrec` with about `percent`% repair data.
-pub fn create(archive: &Path, percent: u8, on_progress: &mut dyn FnMut(&Progress), cancel: Option<&AtomicBool>) -> Result<RecoveryReport> {
+pub fn create(
+    archive: &Path,
+    percent: u8,
+    on_progress: &mut dyn FnMut(&Progress),
+    cancel: Option<&AtomicBool>,
+) -> Result<RecoveryReport> {
     let size = std::fs::metadata(archive)?.len();
     let l = Layout::plan(size, percent);
     let rs = ReedSolomon::new(l.k, l.m).map_err(|e| Error::Damaged(format!("{e:?}")))?;
@@ -104,7 +115,12 @@ pub fn create(archive: &Path, percent: u8, on_progress: &mut dyn FnMut(&Progress
     let out_path = recovery_path(archive);
     let tmp = out_path.with_extension("zkrec.part");
     let mut rep = Reporter::new(on_progress, cancel, size);
-    rep.set_current(&archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    rep.set_current(
+        &archive
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
     let res = (|| -> Result<()> {
         let mut out = BufWriter::new(File::create(&tmp)?);
         out.write_all(MAGIC)?;
@@ -114,7 +130,10 @@ pub fn create(archive: &Path, percent: u8, on_progress: &mut dyn FnMut(&Progress
         out.write_all(&(l.m as u16).to_le_bytes())?;
         out.write_all(&(l.groups as u32).to_le_bytes())?;
         // Reserve the hash tables; parity follows. Filled group by group.
-        out.write_all(&vec![0u8; (l.blocks() * 32 + l.groups * l.m as u64 * 32) as usize])?;
+        out.write_all(&vec![
+            0u8;
+            (l.blocks() * 32 + l.groups * l.m as u64 * 32) as usize
+        ])?;
         out.flush()?;
         let mut out = out.into_inner().map_err(|e| e.into_error())?;
         let mut shards = vec![vec![0u8; l.block as usize]; l.k + l.m];
@@ -124,11 +143,15 @@ pub fn create(archive: &Path, percent: u8, on_progress: &mut dyn FnMut(&Progress
                 read_block(&mut f, &l, i, &mut shards[j])?;
                 out.seek(SeekFrom::Start(l.hashes_at() + i * 32))?;
                 out.write_all(blake3::hash(&shards[j]).as_bytes())?;
-                rep.add(l.block.min(l.file_size.saturating_sub(i * l.block))).map_err(|_| Error::Cancelled)?;
+                rep.add(l.block.min(l.file_size.saturating_sub(i * l.block)))
+                    .map_err(|_| Error::Cancelled)?;
             }
-            rs.encode(&mut shards).map_err(|e| Error::Damaged(format!("{e:?}")))?;
+            rs.encode(&mut shards)
+                .map_err(|e| Error::Damaged(format!("{e:?}")))?;
             for p in 0..l.m {
-                out.seek(SeekFrom::Start(l.parity_hashes_at() + (g * l.m as u64 + p as u64) * 32))?;
+                out.seek(SeekFrom::Start(
+                    l.parity_hashes_at() + (g * l.m as u64 + p as u64) * 32,
+                ))?;
                 out.write_all(blake3::hash(&shards[l.k + p]).as_bytes())?;
                 out.seek(SeekFrom::Start(l.parity_block_at(g, p)))?;
                 out.write_all(&shards[l.k + p])?;
@@ -143,13 +166,18 @@ pub fn create(archive: &Path, percent: u8, on_progress: &mut dyn FnMut(&Progress
     }
     std::fs::rename(&tmp, &out_path)?;
     rep.finish();
-    Ok(RecoveryReport { size: std::fs::metadata(&out_path)?.len(), path: out_path, percent })
+    Ok(RecoveryReport {
+        size: std::fs::metadata(&out_path)?.len(),
+        path: out_path,
+        percent,
+    })
 }
 
 fn read_layout(rec: &mut File) -> Result<Layout> {
     let mut h = [0u8; HEADER_LEN as usize];
     rec.seek(SeekFrom::Start(0))?;
-    rec.read_exact(&mut h).map_err(|_| Error::Damaged("the repair file is incomplete".into()))?;
+    rec.read_exact(&mut h)
+        .map_err(|_| Error::Damaged("the repair file is incomplete".into()))?;
     if &h[..8] != MAGIC {
         return Err(Error::Damaged("not a Zipkoo repair file".into()));
     }
@@ -161,7 +189,13 @@ fn read_layout(rec: &mut File) -> Result<Layout> {
     if block == 0 || k == 0 || m == 0 || k + m > 256 {
         return Err(Error::Damaged("the repair file header is invalid".into()));
     }
-    Ok(Layout { file_size, block, k, m, groups })
+    Ok(Layout {
+        file_size,
+        block,
+        k,
+        m,
+        groups,
+    })
 }
 
 /// Redundancy (percent) of an existing repair file, so it can be rebuilt with the same setting.
@@ -193,14 +227,27 @@ impl Health {
 }
 
 /// Check the archive against its repair file; with `fix`, rebuild damaged blocks in place.
-pub fn check(archive: &Path, fix: bool, on_progress: &mut dyn FnMut(&Progress), cancel: Option<&AtomicBool>) -> Result<Health> {
+pub fn check(
+    archive: &Path,
+    fix: bool,
+    on_progress: &mut dyn FnMut(&Progress),
+    cancel: Option<&AtomicBool>,
+) -> Result<Health> {
     let rec_path = recovery_path(archive);
     let mut rec = BufReader::new(File::open(&rec_path)?).into_inner();
     let l = read_layout(&mut rec)?;
     let rs = ReedSolomon::new(l.k, l.m).map_err(|e| Error::Damaged(format!("{e:?}")))?;
     let actual = std::fs::metadata(archive).map(|m| m.len()).unwrap_or(0);
-    let mut f = if fix { OpenOptions::new().read(true).write(true).open(archive)? } else { File::open(archive)? };
-    let mut health = Health { blocks: l.file_size.div_ceil(l.block), size_ok: actual == l.file_size, ..Default::default() };
+    let mut f = if fix {
+        OpenOptions::new().read(true).write(true).open(archive)?
+    } else {
+        File::open(archive)?
+    };
+    let mut health = Health {
+        blocks: l.file_size.div_ceil(l.block),
+        size_ok: actual == l.file_size,
+        ..Default::default()
+    };
     if actual > l.file_size {
         // Growth is not damage. Repairing would cut the new data off.
         health.outdated = true;
@@ -228,14 +275,19 @@ pub fn check(archive: &Path, fix: bool, on_progress: &mut dyn FnMut(&Progress), 
         if bad.is_empty() {
             continue;
         }
-        let real_bad = bad.iter().filter(|j| l.member(g, **j) * l.block < l.file_size).count() as u64;
+        let real_bad = bad
+            .iter()
+            .filter(|j| l.member(g, **j) * l.block < l.file_size)
+            .count() as u64;
         health.damaged += real_bad;
         let mut good_parity = 0;
         for p in 0..l.m {
             rec.seek(SeekFrom::Start(l.parity_block_at(g, p)))?;
             let mut pb = vec![0u8; l.block as usize];
             let ok = rec.read_exact(&mut pb).is_ok() && {
-                rec.seek(SeekFrom::Start(l.parity_hashes_at() + (g * l.m as u64 + p as u64) * 32))?;
+                rec.seek(SeekFrom::Start(
+                    l.parity_hashes_at() + (g * l.m as u64 + p as u64) * 32,
+                ))?;
                 rec.read_exact(&mut hash).is_ok() && blake3::hash(&pb).as_bytes() == &hash
             };
             if ok {
@@ -250,7 +302,8 @@ pub fn check(archive: &Path, fix: bool, on_progress: &mut dyn FnMut(&Progress), 
             continue;
         }
         if fix {
-            rs.reconstruct_data(&mut shards).map_err(|e| Error::Damaged(format!("{e:?}")))?;
+            rs.reconstruct_data(&mut shards)
+                .map_err(|e| Error::Damaged(format!("{e:?}")))?;
             for j in bad {
                 let i = l.member(g, j);
                 let start = i * l.block;
@@ -283,7 +336,11 @@ mod tests {
             let l = Layout::plan(size, 10);
             assert!(l.blocks() * l.block >= size, "{size}");
             assert!(l.k + l.m <= 256);
-            assert!(l.blocks() <= MAX_BLOCKS + K as u64 * 2, "{size}: {}", l.blocks());
+            assert!(
+                l.blocks() <= MAX_BLOCKS + K as u64 * 2,
+                "{size}: {}",
+                l.blocks()
+            );
         }
     }
 }

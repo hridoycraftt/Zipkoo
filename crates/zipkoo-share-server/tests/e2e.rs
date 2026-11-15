@@ -6,7 +6,11 @@ use zipkoo_share_server::{app, Config};
 /// Start a server on a free port in the background; returns its base URL and storage dir.
 fn server(max_bytes: u64) -> (String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let cfg = Config { dir: dir.path().to_path_buf(), max_bytes, max_hours: 168 };
+    let cfg = Config {
+        dir: dir.path().to_path_buf(),
+        max_bytes,
+        max_hours: 168,
+    };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -21,7 +25,11 @@ fn server(max_bytes: u64) -> (String, tempfile::TempDir) {
 
 fn file(dir: &Path, name: &str, len: usize) -> std::path::PathBuf {
     let p = dir.join(name);
-    fs::write(&p, (0..len).map(|i| (i * 31 % 251) as u8).collect::<Vec<_>>()).unwrap();
+    fs::write(
+        &p,
+        (0..len).map(|i| (i * 31 % 251) as u8).collect::<Vec<_>>(),
+    )
+    .unwrap();
     p
 }
 
@@ -30,9 +38,17 @@ fn share_round_trip_and_server_sees_only_ciphertext() {
     let (url, store) = server(1 << 30);
     let t = tempfile::tempdir().unwrap();
     // Not a multiple of the chunk size, plus an empty file.
-    for (name, len) in [("Wedding Photos.zip", 3 * share::CHUNK + 777), ("empty.txt", 0)] {
+    for (name, len) in [
+        ("Wedding Photos.zip", 3 * share::CHUNK + 777),
+        ("empty.txt", 0),
+    ] {
         let src = file(t.path(), name, len);
-        let opts = share::ShareOptions { server: &url, expires_hours: 24, max_downloads: None, password: None };
+        let opts = share::ShareOptions {
+            server: &url,
+            expires_hours: 24,
+            max_downloads: None,
+            password: None,
+        };
         let s = share::upload(&src, &opts, &mut |_| {}).unwrap();
         assert!(s.url.starts_with(&format!("{url}/s/")) && s.url.contains('#'));
         // The stored blob is not the plaintext and doesn't contain the file name.
@@ -49,22 +65,52 @@ fn password_limit_and_delete() {
     let (url, _store) = server(1 << 30);
     let t = tempfile::tempdir().unwrap();
     let src = file(t.path(), "secret.7z", 200_000);
-    let opts = share::ShareOptions { server: &url, expires_hours: 1, max_downloads: Some(2), password: Some("correct horse") };
+    let opts = share::ShareOptions {
+        server: &url,
+        expires_hours: 1,
+        max_downloads: Some(2),
+        password: Some("correct horse"),
+    };
     let s = share::upload(&src, &opts, &mut |_| {}).unwrap();
     let dest = t.path().join("got");
-    assert!(matches!(share::download(&s.url, &dest, None, &mut |_| {}), Err(zipkoo_core::Error::PasswordRequired)));
-    assert!(matches!(share::download(&s.url, &dest, Some("wrong"), &mut |_| {}), Err(zipkoo_core::Error::WrongPassword)));
+    assert!(matches!(
+        share::download(&s.url, &dest, None, &mut |_| {}),
+        Err(zipkoo_core::Error::PasswordRequired)
+    ));
+    assert!(matches!(
+        share::download(&s.url, &dest, Some("wrong"), &mut |_| {}),
+        Err(zipkoo_core::Error::WrongPassword)
+    ));
     // Failed password attempts are checked against the header only and don't use up downloads.
     share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).unwrap();
     share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).unwrap();
-    assert!(share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).is_err(), "limit of 2 reached");
+    assert!(
+        share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).is_err(),
+        "limit of 2 reached"
+    );
 
-    let s = share::upload(&src, &share::ShareOptions { max_downloads: Some(1), ..opts.clone() }, &mut |_| {}).unwrap();
+    let s = share::upload(
+        &src,
+        &share::ShareOptions {
+            max_downloads: Some(1),
+            ..opts.clone()
+        },
+        &mut |_| {},
+    )
+    .unwrap();
     let got = share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).unwrap();
     assert_eq!(fs::read(got).unwrap(), fs::read(&src).unwrap());
     assert!(share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).is_err());
 
-    let s = share::upload(&src, &share::ShareOptions { max_downloads: None, ..opts.clone() }, &mut |_| {}).unwrap();
+    let s = share::upload(
+        &src,
+        &share::ShareOptions {
+            max_downloads: None,
+            ..opts.clone()
+        },
+        &mut |_| {},
+    )
+    .unwrap();
     assert!(share::delete(&url, &s.id, "not-the-token").is_err());
     share::delete(&url, &s.id, &s.delete_token).unwrap();
     assert!(share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).is_err());
@@ -75,7 +121,12 @@ fn tampering_and_wrong_key_are_caught() {
     let (url, store) = server(1 << 30);
     let t = tempfile::tempdir().unwrap();
     let src = file(t.path(), "a.bin", 2 * share::CHUNK + 5);
-    let opts = share::ShareOptions { server: &url, expires_hours: 1, max_downloads: None, password: None };
+    let opts = share::ShareOptions {
+        server: &url,
+        expires_hours: 1,
+        max_downloads: None,
+        password: None,
+    };
 
     let s = share::upload(&src, &opts, &mut |_| {}).unwrap();
     let blob = store.path().join(format!("{}.bin", s.id));
@@ -85,7 +136,11 @@ fn tampering_and_wrong_key_are_caught() {
     fs::write(&blob, &b).unwrap();
     let dest = t.path().join("got");
     assert!(share::download(&s.url, &dest, None, &mut |_| {}).is_err());
-    assert_eq!(fs::read_dir(&dest).map(|d| d.count()).unwrap_or(0), 0, "no partial file left behind");
+    assert_eq!(
+        fs::read_dir(&dest).map(|d| d.count()).unwrap_or(0),
+        0,
+        "no partial file left behind"
+    );
 
     // Truncated after a whole chunk: the 'last chunk' flag catches it.
     let s = share::upload(&src, &opts, &mut |_| {}).unwrap();
@@ -97,7 +152,11 @@ fn tampering_and_wrong_key_are_caught() {
     // Another link's key.
     let s1 = share::upload(&src, &opts, &mut |_| {}).unwrap();
     let s2 = share::upload(&src, &opts, &mut |_| {}).unwrap();
-    let frankenlink = format!("{}#{}", s1.url.split('#').next().unwrap(), s2.url.split('#').nth(1).unwrap());
+    let frankenlink = format!(
+        "{}#{}",
+        s1.url.split('#').next().unwrap(),
+        s2.url.split('#').nth(1).unwrap()
+    );
     assert!(share::download(&frankenlink, &dest, None, &mut |_| {}).is_err());
     assert!(share::parse_link("https://x/s/abc").is_err());
 }
@@ -107,7 +166,16 @@ fn size_limit_is_enforced() {
     let (url, store) = server(100_000);
     let t = tempfile::tempdir().unwrap();
     let src = file(t.path(), "big.bin", 300_000);
-    let opts = share::ShareOptions { server: &url, expires_hours: 1, max_downloads: None, password: None };
+    let opts = share::ShareOptions {
+        server: &url,
+        expires_hours: 1,
+        max_downloads: None,
+        password: None,
+    };
     assert!(share::upload(&src, &opts, &mut |_| {}).is_err());
-    assert_eq!(fs::read_dir(store.path()).unwrap().count(), 0, "rejected uploads leave nothing behind");
+    assert_eq!(
+        fs::read_dir(store.path()).unwrap().count(),
+        0,
+        "rejected uploads leave nothing behind"
+    );
 }

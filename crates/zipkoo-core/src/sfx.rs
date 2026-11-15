@@ -27,7 +27,10 @@ pub fn build(
     cancel: Option<&AtomicBool>,
 ) -> Result<PackReport> {
     if !stub.is_file() {
-        return Err(Error::Io(io::Error::new(io::ErrorKind::NotFound, format!("SFX stub not found: {}", stub.display()))));
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("SFX stub not found: {}", stub.display()),
+        )));
     }
     // Quick check before spending time packing: stored size can't be below the input once
     // nothing compresses, so only refuse up front when even a 4x squeeze couldn't fit.
@@ -36,7 +39,12 @@ pub fn build(
         return Err(Error::SfxTooBig);
     }
     let payload = output.with_extension("sfx-payload.zip");
-    let zip_opts = PackOptions { format: Format::Zip, split_size: None, hide_names: false, ..opts.clone() };
+    let zip_opts = PackOptions {
+        format: Format::Zip,
+        split_size: None,
+        hide_names: false,
+        ..opts.clone()
+    };
     let mut report = pack(inputs, &payload, &zip_opts, on_progress, cancel)?;
     let res = (|| -> Result<u64> {
         let total = fs::metadata(stub)?.len() + fs::metadata(&payload)?.len() + TRAILER_LEN;
@@ -96,7 +104,12 @@ pub struct Window<R> {
 impl<R: Read + Seek> Window<R> {
     pub fn new(mut inner: R, start: u64, len: u64) -> io::Result<Self> {
         inner.seek(SeekFrom::Start(start))?;
-        Ok(Self { inner, start, len, pos: 0 })
+        Ok(Self {
+            inner,
+            start,
+            len,
+            pos: 0,
+        })
     }
 }
 
@@ -121,7 +134,10 @@ impl<R: Read + Seek> Seek for Window<R> {
             SeekFrom::Current(d) => self.pos as i128 + d as i128,
         };
         if target < 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "seek before start"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "seek before start",
+            ));
         }
         self.pos = target as u64;
         self.inner.seek(SeekFrom::Start(self.start + self.pos))?;

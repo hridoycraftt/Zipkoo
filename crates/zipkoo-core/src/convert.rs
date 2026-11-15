@@ -17,11 +17,22 @@ pub struct ConvertOptions<'a> {
 
 /// Where a converted copy goes: same folder, same name, new extension, never overwriting.
 pub fn converted_path(src: &Path, to: Format) -> PathBuf {
-    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let name = crate::split::strip_part_suffix(&name).to_string();
     let stem = Format::from_name(&name)
-        .and_then(|f| name.strip_suffix(&format!(".{}", f.extension())).map(str::to_string))
-        .unwrap_or_else(|| Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(name.clone()));
+        .and_then(|f| {
+            name.strip_suffix(&format!(".{}", f.extension()))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| {
+            Path::new(&name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or(name.clone())
+        });
     unique_path(&src.with_file_name(format!("{stem}.{}", to.extension())))
 }
 
@@ -39,9 +50,15 @@ pub fn convert(
     let parent = out.parent().unwrap_or(Path::new("."));
     let work = unique_path(&parent.join(".zipkoo-convert"));
     let res = (|| {
-        let eo = ExtractOptions { password: opts.password, ..Default::default() };
+        let eo = ExtractOptions {
+            password: opts.password,
+            ..Default::default()
+        };
         extract(src, &work, &eo, on_progress, cancel)?;
-        let mut inputs: Vec<PathBuf> = fs::read_dir(&work)?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+        let mut inputs: Vec<PathBuf> = fs::read_dir(&work)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
         inputs.sort();
         if inputs.is_empty() {
             return Err(Error::NoInputs);

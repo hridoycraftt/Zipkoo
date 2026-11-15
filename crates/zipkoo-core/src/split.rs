@@ -79,8 +79,16 @@ impl Drop for TempDir {
 fn unique_temp_dir() -> std::io::Result<TempDir> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("zipkoo-join-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed), nanos));
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "zipkoo-join-{}-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed),
+        nanos
+    ));
     fs::create_dir_all(&dir)?;
     Ok(TempDir(dir))
 }

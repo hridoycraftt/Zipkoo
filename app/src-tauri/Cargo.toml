@@ -27,6 +27,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-drag = "2.1"
 trash = "5"
+tauri-plugin-notification = "2.8"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }

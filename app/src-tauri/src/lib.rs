@@ -3,13 +3,15 @@ pub mod features;
 pub mod shell;
 
 use serde::{Deserialize, Serialize};
+use shell::{Inbox, ShellAction};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
-use shell::{Inbox, ShellAction};
-use zipkoo_core::{ArchiveInfo, ExtractOptions, ExtractReport, Format, Level, PackOptions, PackReport, Progress};
+use zipkoo_core::{
+    ArchiveInfo, ExtractOptions, ExtractReport, Format, Level, PackOptions, PackReport, Progress,
+};
 
 #[derive(Default)]
 pub struct Jobs(pub Mutex<HashMap<String, Arc<AtomicBool>>>);
@@ -34,7 +36,10 @@ impl From<zipkoo_core::Error> for UiError {
             E::Damaged(_) => "damaged",
             _ => "error",
         };
-        UiError { code, message: e.to_string() }
+        UiError {
+            code,
+            message: e.to_string(),
+        }
     }
 }
 
@@ -83,7 +88,10 @@ struct ExtractRequest {
 
 fn register(jobs: &Jobs, id: &str) -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
-    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), flag.clone());
+    jobs.0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.to_string(), flag.clone());
     flag
 }
 
@@ -91,21 +99,38 @@ fn register(jobs: &Jobs, id: &str) -> Arc<AtomicBool> {
 async fn inspect_archive(path: PathBuf, password: Option<String>) -> Result<ArchiveInfo, UiError> {
     tauri::async_runtime::spawn_blocking(move || zipkoo_core::inspect(&path, password.as_deref()))
         .await
-        .map_err(|e| UiError { code: "error", message: e.to_string() })?
+        .map_err(|e| UiError {
+            code: "error",
+            message: e.to_string(),
+        })?
         .map_err(Into::into)
 }
 
 /// Raw bytes for Peek previews (images, text, PDF). Capped at 64 MB.
 #[tauri::command]
-async fn peek_file(path: PathBuf, name: String, password: Option<String>) -> Result<tauri::ipc::Response, UiError> {
-    let bytes = tauri::async_runtime::spawn_blocking(move || zipkoo_core::peek(&path, &name, password.as_deref(), 64 << 20))
-        .await
-        .map_err(|e| UiError { code: "error", message: e.to_string() })??;
+async fn peek_file(
+    path: PathBuf,
+    name: String,
+    password: Option<String>,
+) -> Result<tauri::ipc::Response, UiError> {
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        zipkoo_core::peek(&path, &name, password.as_deref(), 64 << 20)
+    })
+    .await
+    .map_err(|e| UiError {
+        code: "error",
+        message: e.to_string(),
+    })??;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]
-async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: PackRequest) -> Result<PackReport, UiError> {
+async fn pack_files(
+    app: AppHandle,
+    jobs: State<'_, Jobs>,
+    job: String,
+    req: PackRequest,
+) -> Result<PackReport, UiError> {
     let cancel = register(&jobs, &job);
     let job2 = job.clone();
     let res = tauri::async_runtime::spawn_blocking(move || {
@@ -119,18 +144,35 @@ async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: Pac
             ..Default::default()
         };
         let mut emit = |p: &Progress| {
-            let _ = app.emit("job-progress", JobEvent { job: &job2, progress: p });
+            let _ = app.emit(
+                "job-progress",
+                JobEvent {
+                    job: &job2,
+                    progress: p,
+                },
+            );
         };
         // Optional photo shrinking into a temporary copy next to the output.
-        let parent = req.output.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let shrink_dir = req.shrink_photos.then(|| zipkoo_core::unique_path(&parent.join(".zipkoo-shrink")));
+        let parent = req
+            .output
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        let shrink_dir = req
+            .shrink_photos
+            .then(|| zipkoo_core::unique_path(&parent.join(".zipkoo-shrink")));
         let inputs: Vec<PathBuf> = match &shrink_dir {
             Some(dir) => {
-                let prepared = zipkoo_core::optimize::optimize(&req.inputs, dir, &Default::default()).and_then(|_| {
-                    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-                    v.sort();
-                    Ok(v)
-                });
+                let prepared =
+                    zipkoo_core::optimize::optimize(&req.inputs, dir, &Default::default())
+                        .and_then(|_| {
+                            let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?
+                                .filter_map(|e| e.ok())
+                                .map(|e| e.path())
+                                .collect();
+                            v.sort();
+                            Ok(v)
+                        });
                 match prepared {
                     Ok(v) => v,
                     Err(e) => {
@@ -143,8 +185,18 @@ async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: Pac
         };
         let res = if req.sfx {
             match sfx_stub(&app) {
-                Some(stub) => zipkoo_core::sfx::build(&stub, &inputs, &req.output, &opts, &mut emit, Some(&cancel)),
-                None => Err(zipkoo_core::Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "The self-extracting stub is missing from this install."))),
+                Some(stub) => zipkoo_core::sfx::build(
+                    &stub,
+                    &inputs,
+                    &req.output,
+                    &opts,
+                    &mut emit,
+                    Some(&cancel),
+                ),
+                None => Err(zipkoo_core::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "The self-extracting stub is missing from this install.",
+                ))),
             }
         } else {
             zipkoo_core::pack(&inputs, &req.output, &opts, &mut emit, Some(&cancel))
@@ -161,13 +213,24 @@ async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: Pac
         Ok::<_, zipkoo_core::Error>(report)
     })
     .await
-    .map_err(|e| UiError { code: "error", message: e.to_string() })?;
-    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).remove(&job);
+    .map_err(|e| UiError {
+        code: "error",
+        message: e.to_string(),
+    })?;
+    jobs.0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&job);
     res.map_err(Into::into)
 }
 
 #[tauri::command]
-async fn extract_archive(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: ExtractRequest) -> Result<ExtractReport, UiError> {
+async fn extract_archive(
+    app: AppHandle,
+    jobs: State<'_, Jobs>,
+    job: String,
+    req: ExtractRequest,
+) -> Result<ExtractReport, UiError> {
     let cancel = register(&jobs, &job);
     let job2 = job.clone();
     let res = tauri::async_runtime::spawn_blocking(move || {
@@ -181,13 +244,25 @@ async fn extract_archive(app: AppHandle, jobs: State<'_, Jobs>, job: String, req
             ..Default::default()
         };
         let mut emit = |p: &Progress| {
-            let _ = app.emit("job-progress", JobEvent { job: &job2, progress: p });
+            let _ = app.emit(
+                "job-progress",
+                JobEvent {
+                    job: &job2,
+                    progress: p,
+                },
+            );
         };
         zipkoo_core::extract(&req.archive, &req.dest, &opts, &mut emit, Some(&cancel))
     })
     .await
-    .map_err(|e| UiError { code: "error", message: e.to_string() })?;
-    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).remove(&job);
+    .map_err(|e| UiError {
+        code: "error",
+        message: e.to_string(),
+    })?;
+    jobs.0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&job);
     res.map_err(Into::into)
 }
 
@@ -202,18 +277,34 @@ fn cancel_job(jobs: State<'_, Jobs>, job: String) {
 async fn hash_file(path: PathBuf) -> Result<String, UiError> {
     tauri::async_runtime::spawn_blocking(move || zipkoo_core::hash::sha256_file(&path))
         .await
-        .map_err(|e| UiError { code: "error", message: e.to_string() })?
-        .map_err(|e| UiError { code: "error", message: e.to_string() })
+        .map_err(|e| UiError {
+            code: "error",
+            message: e.to_string(),
+        })?
+        .map_err(|e| UiError {
+            code: "error",
+            message: e.to_string(),
+        })
 }
 
 /// Where the SFX stub lives: bundled as a resource on Windows, next to the binary in dev builds.
 fn sfx_stub(app: &AppHandle) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "zipkoo-sfx.exe" } else { "zipkoo-sfx" };
+    let name = if cfg!(windows) {
+        "zipkoo-sfx.exe"
+    } else {
+        "zipkoo-sfx"
+    };
     let mut candidates = Vec::new();
-    if let Ok(p) = app.path().resolve(name, tauri::path::BaseDirectory::Resource) {
+    if let Ok(p) = app
+        .path()
+        .resolve(name, tauri::path::BaseDirectory::Resource)
+    {
         candidates.push(p);
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+    {
         candidates.push(dir.join(name));
         candidates.push(dir.join("../release").join(name));
     }
@@ -236,22 +327,37 @@ fn suggest_pack_output(inputs: Vec<PathBuf>, ext: String) -> Option<PathBuf> {
     let parent = first.parent()?.to_path_buf();
     let name = if inputs.len() == 1 {
         let n = first.file_name()?.to_string_lossy().into_owned();
-        if first.is_dir() { n } else { first.file_stem()?.to_string_lossy().into_owned() }
+        if first.is_dir() {
+            n
+        } else {
+            first.file_stem()?.to_string_lossy().into_owned()
+        }
     } else {
-        parent.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Archive".into())
+        parent
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Archive".into())
     };
-    Some(zipkoo_core::unique_path(&parent.join(format!("{name}.{ext}"))))
+    Some(zipkoo_core::unique_path(
+        &parent.join(format!("{name}.{ext}")),
+    ))
 }
 
 /// "Extract here": skip the extra folder when the archive already has one top folder.
 #[tauri::command]
-async fn suggest_extract_dest(path: PathBuf, password: Option<String>) -> Result<zipkoo_core::ExtractTarget, UiError> {
+async fn suggest_extract_dest(
+    path: PathBuf,
+    password: Option<String>,
+) -> Result<zipkoo_core::ExtractTarget, UiError> {
     tauri::async_runtime::spawn_blocking(move || {
         let info = zipkoo_core::inspect(&path, password.as_deref())?;
         Ok::<_, zipkoo_core::Error>(zipkoo_core::suggest_dest(&path, &info))
     })
     .await
-    .map_err(|e| UiError { code: "error", message: e.to_string() })?
+    .map_err(|e| UiError {
+        code: "error",
+        message: e.to_string(),
+    })?
     .map_err(Into::into)
 }
 
@@ -263,13 +369,23 @@ struct ShellStatus {
 
 #[tauri::command]
 fn shell_status() -> ShellStatus {
-    ShellStatus { supported: shell::supported(), installed: shell::is_installed() }
+    ShellStatus {
+        supported: shell::supported(),
+        installed: shell::is_installed(),
+    }
 }
 
 #[tauri::command]
 fn shell_set(enabled: bool) -> Result<ShellStatus, UiError> {
-    let r = if enabled { shell::install() } else { shell::uninstall() };
-    r.map_err(|e| UiError { code: "error", message: e.to_string() })?;
+    let r = if enabled {
+        shell::install()
+    } else {
+        shell::uninstall()
+    };
+    r.map_err(|e| UiError {
+        code: "error",
+        message: e.to_string(),
+    })?;
     Ok(shell_status())
 }
 
@@ -305,9 +421,12 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init());
     #[cfg(feature = "direct")]
-    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build()).plugin(tauri_plugin_process::init());
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
     builder
         .manage(Jobs::default())
         .manage(Inbox::default())
@@ -327,7 +446,12 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_millis(120));
                 let ready = handle.state::<Inbox>().take_ready();
                 if !ready.is_empty() {
-                    handle.state::<Pending>().0.lock().unwrap_or_else(|e| e.into_inner()).extend(ready);
+                    handle
+                        .state::<Pending>()
+                        .0
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .extend(ready);
                     bring_to_front(&handle);
                     let _ = handle.emit("shell-actions", ());
                 }
@@ -371,8 +495,15 @@ pub fn run() {
             features::prepare_drag,
             features::extract_conflicts,
             features::test_archive,
+            features::salvage_zip,
             features::app_info,
-            features::trash_path
+            features::trash_path,
+            features::passwords_list,
+            features::password_add,
+            features::password_remove,
+            features::password_find,
+            features::scan_available,
+            features::virus_scan
         ])
         .build(tauri::generate_context!())
         .expect("error while building Zipkoo")
@@ -380,7 +511,11 @@ pub fn run() {
             // Finder opening a file with Zipkoo (double-click on a .zip, "Open With").
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = &_event {
-                let paths: Vec<String> = urls.iter().filter_map(|u| u.to_file_path().ok()).map(|p| p.display().to_string()).collect();
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.display().to_string())
+                    .collect();
                 receive(_app, paths);
             }
         });

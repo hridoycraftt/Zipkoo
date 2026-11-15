@@ -20,7 +20,8 @@ fn damaged(m: &str) -> Error {
 
 fn read_sector(f: &mut File, lba: u64, buf: &mut [u8]) -> Result<()> {
     f.seek(SeekFrom::Start(lba * SECTOR))?;
-    f.read_exact(buf).map_err(|_| damaged("unexpected end of image"))
+    f.read_exact(buf)
+        .map_err(|_| damaged("unexpected end of image"))
 }
 
 /// Root directory (lba, size) and whether names are Joliet (UCS-2 big-endian).
@@ -34,10 +35,15 @@ fn root(f: &mut File) -> Result<(u64, u64, bool)> {
             return Err(damaged("not an ISO 9660 image"));
         }
         let rec = &vd[156..190];
-        let at = (u32::from_le_bytes(rec[2..6].try_into().unwrap()) as u64, u32::from_le_bytes(rec[10..14].try_into().unwrap()) as u64);
+        let at = (
+            u32::from_le_bytes(rec[2..6].try_into().unwrap()) as u64,
+            u32::from_le_bytes(rec[10..14].try_into().unwrap()) as u64,
+        );
         match vd[0] {
             1 => primary = Some(at),
-            2 if vd[88] == 0x25 && vd[89] == 0x2F && matches!(vd[90], 0x40 | 0x43 | 0x45) => joliet = Some(at),
+            2 if vd[88] == 0x25 && vd[89] == 0x2F && matches!(vd[90], 0x40 | 0x43 | 0x45) => {
+                joliet = Some(at)
+            }
             255 => break,
             _ => {}
         }
@@ -51,7 +57,10 @@ fn root(f: &mut File) -> Result<(u64, u64, bool)> {
 
 fn decode_name(raw: &[u8], joliet: bool) -> String {
     let s = if joliet {
-        let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = raw
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
         String::from_utf16_lossy(&units)
     } else {
         String::from_utf8_lossy(raw).into_owned()
@@ -74,7 +83,8 @@ pub(crate) fn list(path: &Path) -> Result<Vec<IsoEntry>> {
         }
         let mut dir = vec![0u8; size as usize];
         f.seek(SeekFrom::Start(lba * SECTOR))?;
-        f.read_exact(&mut dir).map_err(|_| damaged("directory runs past the end"))?;
+        f.read_exact(&mut dir)
+            .map_err(|_| damaged("directory runs past the end"))?;
         let mut i = 0usize;
         while i < dir.len() {
             let len = dir[i] as usize;
@@ -102,15 +112,25 @@ pub(crate) fn list(path: &Path) -> Result<Vec<IsoEntry>> {
             let name = decode_name(raw, joliet);
             if flags & 0x02 != 0 {
                 let full = format!("{prefix}{name}/");
-                out.push(IsoEntry { name: full.clone(), is_dir: true, extents: vec![] });
+                out.push(IsoEntry {
+                    name: full.clone(),
+                    is_dir: true,
+                    extents: vec![],
+                });
                 stack.push((ext_lba, data_len, full));
             } else {
                 let full = format!("{prefix}{name}");
                 let extent = (ext_lba * SECTOR, data_len);
                 // Multi-extent files (> 4 GB) repeat the same name with flag 0x80 on all but the last.
                 match out.last_mut() {
-                    Some(prev) if !prev.is_dir && prev.name == full && prev.extents.len() < 64 => prev.extents.push(extent),
-                    _ => out.push(IsoEntry { name: full, is_dir: false, extents: vec![extent] }),
+                    Some(prev) if !prev.is_dir && prev.name == full && prev.extents.len() < 64 => {
+                        prev.extents.push(extent)
+                    }
+                    _ => out.push(IsoEntry {
+                        name: full,
+                        is_dir: false,
+                        extents: vec![extent],
+                    }),
                 }
             }
         }
@@ -126,5 +146,8 @@ pub(crate) fn open(path: &Path, e: &IsoEntry) -> Result<Box<dyn Read>> {
         f.seek(SeekFrom::Start(off))?;
         parts.push(Box::new(f.take(len)));
     }
-    Ok(parts.into_iter().reduce(|a, b| Box::new(a.chain(b))).unwrap_or_else(|| Box::new(std::io::empty())))
+    Ok(parts
+        .into_iter()
+        .reduce(|a, b| Box::new(a.chain(b)))
+        .unwrap_or_else(|| Box::new(std::io::empty())))
 }

@@ -178,8 +178,20 @@ export const EDITABLE: Format[] = ["zip", "seven-z", "tar-zst"];
 export const extractConflicts = (q: { archive: string; dest: string; password?: string | null; only?: string[]; strip?: string | null }) =>
   invoke<string[]>("extract_conflicts", { q: { ...q, password: q.password ?? null } });
 export interface TestReport { files: number; bytes: number; errors: [string, string][] }
+export interface SalvageReport { output: string; recovered: number; bytes: number; lost: [string, string][] }
+export const salvageZip = (jobId: string, archive: string) => invoke<SalvageReport>("salvage_zip", { jobId, archive });
 export const testArchive = (jobId: string, archive: string, password?: string) => invoke<TestReport>("test_archive", { jobId, archive, password: password ?? null });
 
 export interface AppInfo { version: string; flavor: "direct" | "appstore"; updater_ready: boolean; os: string }
 export const appInfo = () => invoke<AppInfo>("app_info");
 export const trashPath = (path: string) => invoke<void>("trash_path", { path });
+
+export interface SavedPassword { id: string; label: string; created: number }
+export const passwordsList = () => invoke<SavedPassword[]>("passwords_list");
+export const passwordAdd = (label: string, password: string, archive?: string) => invoke<SavedPassword[]>("password_add", { label, password, archive: archive ?? null });
+export const passwordRemove = (id: string) => invoke<SavedPassword[]>("password_remove", { id });
+export const passwordFind = (path: string) => invoke<string | null>("password_find", { path });
+
+export interface ScanResult { engine: string; clean: boolean; threats: string[] }
+export const scanAvailable = () => invoke<string | null>("scan_available");
+export const virusScan = (path: string) => invoke<ScanResult>("virus_scan", { path });

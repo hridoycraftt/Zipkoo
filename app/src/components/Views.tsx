@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-  ARCHIVE_EXTS, asUiError, convertArchives, findDuplicates, healCheck, testArchive, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
+  ARCHIVE_EXTS, virusScan, scanAvailable, asUiError, convertArchives, findDuplicates, healCheck, testArchive, salvageZip, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
   shareDelete, shareDownload, sharesList, watchRemove, watchRunNow, watchSave, watchesList,
   type CloudFolder, type DupGroup, type FolderItem, type Health, type Hit, type IndexStats, type ShareRecord, type Watch,
 } from "../api";
@@ -336,12 +336,23 @@ export function ShareSheet({ t, name, onCancel, onCreate }: { t: T; name: string
 
 // ---------- Tools ----------
 
-export function HealthPanel({ ctx, archive, password }: { ctx: ViewCtx; archive: string; password?: string }) {
+export function HealthPanel({ ctx, archive, password, standalone }: { ctx: ViewCtx; archive: string; password?: string; standalone?: boolean }) {
   const { t, lang } = ctx;
   const [has, setHas] = useState<boolean | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [msg, setMsg] = useState<string>("");
   const [testFailed, setTestFailed] = useState(false);
+  const [scanner, setScanner] = useState<string | null>(null);
+  useEffect(() => {
+    scanAvailable().then(setScanner).catch(() => {});
+  }, []);
+  const runScan = async () => {
+    const r = await ctx.runJob(t("scanning"), () => virusScan(archive));
+    if (!r) return;
+    setHealth(null);
+    setTestFailed(!r.clean);
+    setMsg(r.clean ? t("scanClean", { engine: r.engine }) : `${t("scanThreats", { engine: r.engine, n: num(r.threats.length, lang) })} ${r.threats.slice(0, 3).join(" · ")}`);
+  };
   const reload = useCallback(() => healStatus(archive).then((s) => setHas(s.has_repair_data)).catch(() => setHas(false)), [archive]);
   useEffect(() => {
     setHealth(null);
@@ -376,6 +387,15 @@ export function HealthPanel({ ctx, archive, password }: { ctx: ViewCtx; archive:
     setMsg(r.errors.length === 0 ? t("testOk", { n: num(r.files, lang) }) : t("testBad", { n: num(r.errors.length, lang), list: r.errors.slice(0, 3).map(([n, why]) => `${n.split("/").pop()} (${why})`).join(", ") }));
     setTestFailed(r.errors.length > 0);
   };
+  const isZip = /\.(zip|zipx)$/i.test(archive);
+  const salvage = async () => {
+    const r = await ctx.runJob(t("salvaging"), (id) => salvageZip(id, archive));
+    if (!r) return;
+    setHealth(null);
+    setTestFailed(r.lost.length > 0);
+    setMsg(t("salvageDone", { n: num(r.recovered, lang), name: baseName(r.output) }) + (r.lost.length ? " " + t("salvageLost", { n: num(r.lost.length, lang) }) : ""));
+    ctx.toast({ kind: "ok", text: t("salvageDone", { n: num(r.recovered, lang), name: baseName(r.output) }), action: { label: t("showInFolder"), run: () => revealItemInDir(r.output) } });
+  };
   const fixable = health && !health.outdated && (health.damaged > 0 || !health.size_ok) && health.unrecoverable === 0 && health.repaired === 0;
   return (
     <div className="health">
@@ -384,9 +404,11 @@ export function HealthPanel({ ctx, archive, password }: { ctx: ViewCtx; archive:
       {health?.outdated && <button className="btn small" onClick={add}>{t("addRepair")}</button>}
       <div className="row gap">
         <button className="btn small" onClick={runTest}>{t("testArchive")}</button>
+        {scanner && <button className="btn small" onClick={runScan}>{t("scanBtn")}</button>}
         {has && <button className="btn small" onClick={() => check(false)}>{t("checkHealth")}</button>}
         {fixable && <button className="btn primary small" onClick={() => check(true)}>{t("repair")}</button>}
         {has === false && <button className="btn small" onClick={add}>{t("addRepair")}</button>}
+        {isZip && (standalone || testFailed || (health && health.unrecoverable > 0)) && <button className="btn small" onClick={salvage} title={t("salvageHint")}>{t("salvageBtn")}</button>}
       </div>
     </div>
   );
@@ -478,7 +500,7 @@ export function ToolsView({ ctx }: { ctx: ViewCtx }) {
           <button className="btn" onClick={pickRepair}>{t("repairPick")}</button>
           {repairTarget && <span className="small ellipsis">{baseName(repairTarget)}</span>}
         </div>
-        {repairTarget && <HealthPanel ctx={ctx} archive={repairTarget} />}
+        {repairTarget && <HealthPanel key={repairTarget} ctx={ctx} archive={repairTarget} standalone />}
       </section>
     </Page>
   );
