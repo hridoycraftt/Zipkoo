@@ -34,15 +34,22 @@ pub struct Snapshot {
 }
 
 /// A cheap fingerprint of a folder: every file's path, size and modified time.
+/// Sizes and times come from `fs::metadata` on each file, not from the directory listing:
+/// on Windows (NTFS) the listing's cached values can lag behind until a file is reopened,
+/// which made unchanged folders look changed. Folder times are left out (they move when
+/// anything inside is touched, including by antivirus or indexers).
 pub fn fingerprint(dir: &Path) -> String {
     let mut h = blake3::Hasher::new();
     for e in walkdir::WalkDir::new(dir).sort_by_file_name().into_iter().filter_map(|e| e.ok()) {
-        let rel = e.path().strip_prefix(dir).unwrap_or(e.path()).to_string_lossy().into_owned();
+        let rel = e.path().strip_prefix(dir).unwrap_or(e.path()).to_string_lossy().replace('\\', "/");
         h.update(rel.as_bytes());
-        if let Ok(m) = e.metadata() {
-            h.update(&m.len().to_le_bytes());
-            if let Ok(t) = m.modified().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other)) {
-                h.update(&t.as_nanos().to_le_bytes());
+        h.update(&[0]);
+        if e.file_type().is_file() {
+            if let Ok(m) = fs::metadata(e.path()) {
+                h.update(&m.len().to_le_bytes());
+                if let Ok(t) = m.modified().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other)) {
+                    h.update(&t.as_nanos().to_le_bytes());
+                }
             }
         }
     }
