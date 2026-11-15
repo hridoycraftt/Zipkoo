@@ -237,3 +237,26 @@ fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Repor
     }
     Ok(stored)
 }
+
+/// `path` if free, else "name (2).ext", "name (3).ext"... Handles double extensions like .tar.zst.
+pub fn unique_path(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let parent = path.parent().unwrap_or(Path::new(""));
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let (stem, ext) = match name.find(".tar.") {
+        Some(i) => (name[..i].to_string(), name[i..].to_string()),
+        None => match name.rfind('.') {
+            Some(i) if i > 0 && !path.is_dir() => (name[..i].to_string(), name[i..].to_string()),
+            _ => (name.clone(), String::new()),
+        },
+    };
+    for n in 2.. {
+        let p = parent.join(format!("{stem} ({n}){ext}"));
+        if !p.exists() {
+            return p;
+        }
+    }
+    unreachable!()
+}

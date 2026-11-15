@@ -15,7 +15,7 @@ pub struct Reporter<'a> {
     pub on_progress: &'a mut dyn FnMut(&Progress),
     pub cancel: Option<&'a AtomicBool>,
     pub state: Progress,
-    last_emit: u64,
+    last_emit: std::time::Instant,
 }
 
 impl<'a> Reporter<'a> {
@@ -24,19 +24,25 @@ impl<'a> Reporter<'a> {
             on_progress,
             cancel,
             state: Progress { done_bytes: 0, total_bytes: total, current: String::new() },
-            last_emit: 0,
+            last_emit: std::time::Instant::now(),
+        }
+    }
+    /// Updates are throttled by time (about 12 per second), so a 100 GB job and a folder of
+    /// 100,000 tiny files both stay smooth without flooding the UI.
+    fn maybe_emit(&mut self) {
+        if self.last_emit.elapsed() >= std::time::Duration::from_millis(80) {
+            self.last_emit = std::time::Instant::now();
+            (self.on_progress)(&self.state);
         }
     }
     pub fn set_current(&mut self, name: &str) {
-        self.state.current = name.to_string();
-        (self.on_progress)(&self.state);
+        self.state.current.clear();
+        self.state.current.push_str(name);
+        self.maybe_emit();
     }
     pub fn add(&mut self, n: u64) -> io::Result<()> {
         self.state.done_bytes += n;
-        if self.state.done_bytes - self.last_emit >= 1 << 20 {
-            self.last_emit = self.state.done_bytes;
-            (self.on_progress)(&self.state);
-        }
+        self.maybe_emit();
         if self.cancel.map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
             return Err(io::Error::new(io::ErrorKind::Other, "zipkoo: cancelled"));
         }

@@ -215,7 +215,7 @@ h1, h2 { text-wrap: balance; letter-spacing: -0.022em; }
 .list-head, .row-item { display: grid; grid-template-columns: 44px minmax(0, 1fr) 96px 96px; align-items: center; column-gap: 8px; padding: 0 28px 0 18px; }
 .list-head { font-size: 12.5px; font-weight: 600; color: var(--muted); height: 34px; border-bottom: 1px solid var(--hair); }
 .list-body { flex: 1; overflow: auto; padding: 4px 10px 10px; }
-.row-item { min-height: 56px; border-radius: var(--r-md); padding: 0 18px 0 8px; cursor: default; transition: background 0.12s; }
+.row-item { height: 56px; border-radius: var(--r-md); padding: 0 18px 0 8px; cursor: default; transition: background 0.12s; }
 .row-item:hover { background: var(--pane-2); }
 .row-item.picked { background: #fbf6ec; }
 .row-item.focus { background: var(--haldi-wash); }
@@ -313,3 +313,5 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
   .archive { grid-template-columns: 1fr; }
   .peek { display: none; }
 }
+
+.side-switch { font-size: 13px; color: var(--ink-2); padding: 4px 8px 6px; }

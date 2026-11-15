@@ -67,6 +67,17 @@ enum Cmd {
         #[arg(short, long)]
         password: Option<String>,
     },
+    /// Make a self-extracting program (needs the zipkoo-sfx stub next to this binary, or --stub)
+    Sfx {
+        inputs: Vec<PathBuf>,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Ask for a password and encrypt with AES-256
+        #[arg(long)]
+        lock: bool,
+        #[arg(long)]
+        stub: Option<PathBuf>,
+    },
     /// Print the SHA-256 of a file
     Hash { file: PathBuf },
 }
@@ -142,7 +153,7 @@ fn run() -> Result<(), String> {
             };
             let out = out.unwrap_or_else(|| {
                 let stem = inputs[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "archive".into());
-                PathBuf::from(format!("{stem}.{}", format.extension()))
+                zipkoo_core::unique_path(&PathBuf::from(format!("{stem}.{}", format.extension())))
             });
             let password = if lock { Some(ask_password(true)?) } else { None };
             let opts = PackOptions { format, level, smart: !no_smart, password, hide_names, split_size, ..Default::default() };
@@ -199,6 +210,25 @@ fn run() -> Result<(), String> {
                 }
             }
         },
+        Cmd::Sfx { inputs, out, lock, stub } => {
+            if inputs.is_empty() {
+                return Err("Add at least one file or folder.".into());
+            }
+            let name = if cfg!(windows) { "zipkoo-sfx.exe" } else { "zipkoo-sfx" };
+            let stub = stub
+                .or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join(name))))
+                .filter(|p| p.is_file())
+                .ok_or("Can't find the zipkoo-sfx stub. Build it with `cargo build -p zipkoo-sfx` or pass --stub.")?;
+            let out = out.unwrap_or_else(|| {
+                let stem = inputs[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Archive".into());
+                zipkoo_core::unique_path(&PathBuf::from(if cfg!(windows) { format!("{stem}.exe") } else { format!("{stem}.run") }))
+            });
+            let password = if lock { Some(ask_password(true)?) } else { None };
+            let opts = PackOptions { password, ..Default::default() };
+            let r = zipkoo_core::sfx::build(&stub, &inputs, &out, &opts, &mut bar(), None).map_err(|e| e.to_string())?;
+            eprintln!();
+            println!("✓ {} files · {} → {} ({})", r.files, human(r.input_bytes), out.display(), human(r.output_bytes));
+        }
         Cmd::Hash { file } => {
             println!("{}  {}", zipkoo_core::hash::sha256_file(&file).map_err(|e| e.to_string())?, file.display());
         }

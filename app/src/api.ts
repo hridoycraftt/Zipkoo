@@ -47,11 +47,15 @@ export interface ExtractReport {
 }
 
 export interface UiError {
-  code: "password_required" | "wrong_password" | "too_large" | "cancelled" | "unsupported" | "damaged" | "error";
+  code: "password_required" | "wrong_password" | "too_large" | "no_space" | "cancelled" | "unsupported" | "damaged" | "error";
   message: string;
 }
 
 export function asUiError(e: unknown): UiError {
+  if (e && typeof e === "object" && "code" in e && (e as UiError).code === "no_space") {
+    const m = /needs (\d+) bytes, but only (\d+)/.exec((e as UiError).message);
+    if (m) return { code: "no_space", message: `${m[1]}|${m[2]}` };
+  }
   if (e && typeof e === "object" && "code" in e) return e as UiError;
   return { code: "error", message: String(e) };
 }
@@ -77,6 +81,7 @@ export interface PackRequest {
   password: string | null;
   hideNames: boolean;
   splitSize: number | null;
+  sfx: boolean;
 }
 
 export const packFiles = (job: string, req: PackRequest) => invoke<PackReport>("pack_files", { job, req });
@@ -93,7 +98,19 @@ export interface ExtractRequest {
 export const extractArchive = (job: string, req: ExtractRequest) => invoke<ExtractReport>("extract_archive", { job, req });
 export const cancelJob = (job: string) => invoke<void>("cancel_job", { job });
 export const hashFile = (path: string) => invoke<string>("hash_file", { path });
-export const launchPaths = () => invoke<string[]>("launch_paths");
+export interface ShellAction {
+  action: "zip-here" | "lock" | "add" | "sfx" | "extract-here" | "open" | string;
+  paths: string[];
+}
+export const takeShellActions = () => invoke<ShellAction[]>("take_shell_actions");
+export const onShellActions = (cb: () => void) => listen("shell-actions", cb);
+export const sfxAvailable = () => invoke<boolean>("sfx_available");
+export const suggestPackOutput = (inputs: string[], ext: string) => invoke<string | null>("suggest_pack_output", { inputs, ext });
+export const suggestExtractDest = (path: string, password?: string) =>
+  invoke<{ dest: string; result: string }>("suggest_extract_dest", { path, password: password ?? null });
+export interface ShellStatus { supported: boolean; installed: boolean }
+export const shellStatus = () => invoke<ShellStatus>("shell_status");
+export const shellSet = (enabled: boolean) => invoke<ShellStatus>("shell_set", { enabled });
 
 export function onProgress(cb: (job: string, p: Progress) => void): Promise<UnlistenFn> {
   return listen<{ job: string; progress: Progress }>("job-progress", (e) => cb(e.payload.job, e.payload.progress));

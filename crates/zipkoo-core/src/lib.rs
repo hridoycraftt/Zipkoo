@@ -11,12 +11,13 @@ pub mod inspect;
 pub mod pack;
 pub mod progress;
 pub mod safety;
+pub mod sfx;
 pub mod smart;
 pub mod split;
 
 pub use error::{Error, Result};
-pub use extract::{extract, ExtractOptions, ExtractReport};
+pub use extract::{extract, suggest_dest, ExtractOptions, ExtractReport};
 pub use format::Format;
 pub use inspect::{inspect, peek, ArchiveInfo, Entry};
-pub use pack::{pack, Level, PackOptions, PackReport};
+pub use pack::{pack, unique_path, Level, PackOptions, PackReport};
 pub use progress::Progress;

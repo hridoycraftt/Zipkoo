@@ -117,13 +117,146 @@ fn blocks_zip_slip() {
 }
 
 #[test]
-fn stops_zip_bomb() {
+fn honest_highly_compressible_archive_opens() {
+    // 16 MB of zeros packs to a few KB: a huge ratio, but the sizes are honest and fit on disk.
     let t = tempfile::tempdir().unwrap();
-    let p = t.path().join("bomb.zip");
+    let p = t.path().join("zeros.zip");
     evil_zip(&p, &["a.bin", "b.bin"], &vec![0u8; 8 << 20]);
     let opts = ExtractOptions { max_ratio: 10, floor: 0, ..Default::default() };
+    let r = extract(&p, &t.path().join("out"), &opts, &mut |_| {}, None).unwrap();
+    assert_eq!(r.bytes, 16 << 20);
+}
+
+#[test]
+fn hard_cap_stops_runaway_output() {
+    let t = tempfile::tempdir().unwrap();
+    let p = t.path().join("zeros.zip");
+    evil_zip(&p, &["a.bin", "b.bin"], &vec![0u8; 8 << 20]);
+    let opts = ExtractOptions { max_ratio: 10, floor: 0, hard_cap: Some(10 << 20), ..Default::default() };
     let e = extract(&p, &t.path().join("out"), &opts, &mut |_| {}, None).unwrap_err();
     assert!(matches!(e, Error::TooLarge { .. }));
+    assert!(!t.path().join("out/b.bin").exists(), "partial file must be removed");
+}
+
+#[test]
+fn tiny_and_empty_things() {
+    for format in [Format::Zip, Format::SevenZ, Format::TarZst] {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("Tiny");
+        fs::create_dir_all(root.join("empty-folder")).unwrap();
+        fs::write(root.join("zero.txt"), b"").unwrap();
+        fs::write(root.join("one.txt"), b"x").unwrap();
+        let out = t.path().join(format!("tiny.{}", format.extension()));
+        let opts = PackOptions { format, ..Default::default() };
+        let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
+        assert_eq!(rep.files, 2, "{format:?}");
+        let info = inspect(&out, None).unwrap();
+        assert_eq!(info.total_size, 1, "{format:?}");
+        let dest = t.path().join("x");
+        extract(&out, &dest, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+        assert_eq!(fs::metadata(dest.join("Tiny/zero.txt")).unwrap().len(), 0, "{format:?}");
+        assert_eq!(fs::read(dest.join("Tiny/one.txt")).unwrap(), b"x", "{format:?}");
+        assert!(dest.join("Tiny/empty-folder").is_dir(), "{format:?}");
+
+        // A single empty file on its own.
+        let single = t.path().join(format!("single.{}", format.extension()));
+        pack(&[root.join("zero.txt")], &single, &opts, &mut |_| {}, None).unwrap();
+        let d2 = t.path().join("y");
+        extract(&single, &d2, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+        assert_eq!(fs::metadata(d2.join("zero.txt")).unwrap().len(), 0, "{format:?}");
+    }
+}
+
+#[test]
+fn many_small_files() {
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("Many");
+    for d in 0..50 {
+        let dir = root.join(format!("d{d:02}"));
+        fs::create_dir_all(&dir).unwrap();
+        for f in 0..100 {
+            fs::write(dir.join(format!("f{f:03}.txt")), format!("{d}-{f}")).unwrap();
+        }
+    }
+    for format in [Format::Zip, Format::SevenZ, Format::TarZst] {
+        let out = t.path().join(format!("many.{}", format.extension()));
+        let opts = PackOptions { format, ..Default::default() };
+        let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
+        assert_eq!(rep.files, 5000, "{format:?}");
+        assert_eq!(inspect(&out, None).unwrap().file_count, 5000, "{format:?}");
+        let dest = t.path().join(format!("x-{}", format.extension()));
+        let r = extract(&out, &dest, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+        assert_eq!(r.files, 5000, "{format:?}");
+        assert_eq!(fs::read_to_string(dest.join("Many/d49/f099.txt")).unwrap(), "49-99");
+    }
+}
+
+#[test]
+fn smart_extract_destination() {
+    let t = tempfile::tempdir().unwrap();
+    let src = sample(t.path());
+    let one_folder = t.path().join("one.zip");
+    pack(&[src.clone()], &one_folder, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    let info = inspect(&one_folder, None).unwrap();
+    // "Photos" already exists next to the archive, so it falls back to a new folder.
+    let (dest, result) = suggest_dest(&one_folder, &info);
+    assert_eq!(dest, t.path().join("one"));
+    assert_eq!(result, dest);
+    fs::rename(&src, t.path().join("moved")).unwrap();
+    let (dest, result) = suggest_dest(&one_folder, &info);
+    assert_eq!(dest, t.path());
+    assert_eq!(result, t.path().join("Photos"));
+
+    let loose = t.path().join("loose.zip");
+    evil_zip(&loose, &["a.txt", "b.txt"], b"x");
+    let info = inspect(&loose, None).unwrap();
+    fs::create_dir_all(t.path().join("loose")).unwrap();
+    let (dest, _) = suggest_dest(&loose, &info);
+    assert_eq!(dest, t.path().join("loose (2)"));
+}
+
+/// Over 4 GB (needs ZIP64). Slow and writes ~9 GB of temporary data, so run it on demand:
+/// `cargo test -p zipkoo-core --release -- --ignored huge`
+#[test]
+#[ignore]
+fn huge_file_over_4gb() {
+    use std::io::{Seek, SeekFrom};
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("Big");
+    fs::create_dir_all(&root).unwrap();
+    let big = root.join("disk.img");
+    let size: u64 = (4 << 30) + (300 << 20);
+    {
+        let mut f = fs::File::create(&big).unwrap();
+        f.set_len(size).unwrap();
+        // Real bytes at both ends so a truncated copy would be caught.
+        f.write_all(b"ZIPKOO-START").unwrap();
+        f.seek(SeekFrom::Start(size - 10)).unwrap();
+        f.write_all(b"ZIPKOO-END").unwrap();
+    }
+    for format in [Format::Zip, Format::SevenZ, Format::TarZst] {
+        let out = t.path().join(format!("big.{}", format.extension()));
+        let opts = PackOptions { format, level: Level::Fast, ..Default::default() };
+        let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
+        assert_eq!(rep.input_bytes, size);
+        let info = inspect(&out, None).unwrap();
+        assert_eq!(info.total_size, size, "{format:?}");
+        let dest = t.path().join("x");
+        let r = extract(&out, &dest, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+        assert_eq!(r.bytes, size, "{format:?}");
+        let got = dest.join("Big/disk.img");
+        assert_eq!(fs::metadata(&got).unwrap().len(), size);
+        let mut f = fs::File::open(&got).unwrap();
+        let mut head = [0u8; 12];
+        std::io::Read::read_exact(&mut f, &mut head).unwrap();
+        assert_eq!(&head, b"ZIPKOO-START");
+        f.seek(SeekFrom::Start(size - 10)).unwrap();
+        let mut tail = [0u8; 10];
+        std::io::Read::read_exact(&mut f, &mut tail).unwrap();
+        assert_eq!(&tail, b"ZIPKOO-END", "{format:?}");
+        fs::remove_dir_all(&dest).unwrap();
+        fs::remove_file(&out).unwrap();
+    }
 }
 
 #[test]

@@ -117,13 +117,24 @@ pub fn extract(
     cancel: Option<&AtomicBool>,
 ) -> Result<ExtractReport> {
     let (real, format, archive_size) = resolve(path)?;
-    let total = crate::inspect::inspect(path, opts.password).map(|i| i.total_size).unwrap_or(0);
+    let declared = match crate::inspect::inspect(path, opts.password) {
+        Ok(i) if opts.only.is_empty() => i.total_size,
+        Ok(i) => i.entries.iter().filter(|e| opts.only.iter().any(|o| e.name == *o || e.name.starts_with(&format!("{}/", o.trim_end_matches('/'))))).map(|e| e.size).sum(),
+        Err(_) => 0,
+    };
+    let total = declared;
     fs::create_dir_all(dest)?;
+    // Refuse up front when the declared output can't fit (keeps 64 MB of headroom).
+    if let Ok(free) = fs4::available_space(dest) {
+        if declared > free.saturating_sub(64 << 20) {
+            return Err(Error::NoSpace { need: declared, free });
+        }
+    }
     let mut rep = Reporter::new(on_progress, cancel, total);
     let mut ctx = Ctx {
         dest,
         opts,
-        budget: Budget::for_archive(archive_size, opts.max_ratio, opts.floor, opts.hard_cap),
+        budget: Budget::for_archive(archive_size, opts.max_ratio, opts.floor, declared, opts.hard_cap),
         report: ExtractReport { dest: dest.to_path_buf(), ..Default::default() },
         rep: &mut rep,
     };
@@ -232,4 +243,34 @@ pub fn extract(
     drop(ctx);
     rep.finish();
     Ok(report)
+}
+
+/// Where "Extract here" should put things. If everything sits in one top folder, extract next to
+/// the archive (the folder is created by the archive itself); otherwise use a folder named after it.
+/// Never reuses an existing path: adds " (2)", " (3)"...
+pub fn suggest_dest(archive: &Path, info: &crate::inspect::ArchiveInfo) -> (PathBuf, PathBuf) {
+    let parent = archive.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = crate::split::strip_part_suffix(&name).to_string();
+    let stem = name
+        .strip_suffix(&format!(".{}", info.format.extension()))
+        .map(str::to_string)
+        .unwrap_or_else(|| Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(name.clone()));
+    let tops: std::collections::BTreeSet<&str> = info
+        .entries
+        .iter()
+        .map(|e| e.name.trim_start_matches("./").split('/').next().unwrap_or(""))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let single_folder = tops.len() == 1
+        && info.entries.iter().any(|e| e.name.trim_start_matches("./").contains('/') || e.is_dir);
+    if single_folder {
+        let top = tops.into_iter().next().unwrap();
+        if !parent.join(top).exists() {
+            // Extract into the parent; the result is parent/top.
+            return (parent.clone(), parent.join(top));
+        }
+    }
+    let dest = crate::pack::unique_path(&parent.join(&stem));
+    (dest.clone(), dest)
 }

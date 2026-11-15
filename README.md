@@ -15,7 +15,9 @@
 | Peek: preview images, text and PDF without extracting | ✅ |
 | Desktop app (Tauri): drag and drop, progress with cancel, English + বাংলা | ✅ |
 | `zipkoo` command line | ✅ |
-| Right-click menu in Explorer / Finder, self-extracting `.exe` | 🔜 next |
+| Right-click menu: Explorer (registry, per user) and Finder (Quick Actions) | ✅ |
+| Self-extracting `.exe` (Windows), optional AES-256 password | ✅ |
+| From 0-byte files to files over 4 GB (ZIP64), 100,000+ entries, free-space check | ✅ |
 | Secure Share, Smart Update, Self-heal, Watch Folder, Cloud, global search, Batch convert | 🔜 roadmap |
 
 ## Layout
@@ -23,6 +25,7 @@
 ```
 crates/zipkoo-core   Rust library: pack, inspect, peek, safe extract, split, hash
 crates/zipkoo-cli    `zipkoo` command line
+crates/zipkoo-sfx    Self-extracting stub (~750 KB); the payload ZIP is appended to it
 app/                 Desktop app: React + Vite UI, Tauri 2 shell in app/src-tauri
 .github/workflows    CI tests on Windows/macOS/Linux; tagged releases build installers
 ```
@@ -32,10 +35,21 @@ app/                 Desktop app: React + Vite UI, Tauri 2 shell in app/src-taur
 Needs Rust (stable), Node 22, and on Linux the Tauri system packages (`libwebkit2gtk-4.1-dev` etc.).
 
 ```bash
-cargo test -p zipkoo-core -p zipkoo-cli   # core tests
+cargo test -p zipkoo-core -p zipkoo-cli -p zipkoo-sfx   # tests
+cargo test -p zipkoo-core --release -- --ignored huge     # >4 GB test, writes ~9 GB temp data
 cd app && npm install && npm run tauri dev # run the desktop app
 cargo run -p zipkoo-cli -- pack ./Photos -f 7z --lock
 ```
+
+## Right-click menu
+
+- **Windows:** the NSIS installer runs `Zipkoo.exe --register-shell` (and `--unregister-shell` on uninstall).
+  The switch in the app's sidebar does the same, which also covers MSI installs. Entries live under
+  `HKCU\Software\Classes`, so no admin rights are needed. On Windows 11 they appear under "Show more options".
+- **macOS:** the sidebar switch writes Quick Actions to `~/Library/Services`
+  (Finder › right-click › Quick Actions).
+- Explorer starts one process per selected file; the app merges clicks that arrive within 400 ms
+  into one job.
 
 ## Release
 

@@ -26,6 +26,8 @@ pub enum Error {
     MissingPart(PathBuf),
     #[error("Archive is damaged: {0}")]
     Damaged(String),
+    #[error("Not enough free space: this needs {need} bytes, but only {free} bytes are free.")]
+    NoSpace { need: u64, free: u64 },
     #[error("Cancelled")]
     Cancelled,
 }

@@ -2,6 +2,15 @@
 export type Lang = "en" | "bn";
 
 const en = {
+  sfxFormat: "EXE",
+  noSpace: "Not enough free space. This needs {need}, but only {free} is free. Free up space or pick another drive.",
+  sfxHint: "A program that unpacks itself. The other person double-clicks it; no app needed. Windows only.",
+  sfxToast: "Done! {name} unpacks itself on any Windows PC.",
+  rightClick: "Right-click menu",
+  rightClickOn: "Zipkoo is in your right-click menu.",
+  rightClickOff: "Add Zipkoo to your right-click menu.",
+  rightClickMac: "Finder: right-click › Quick Actions.",
+  extractingN: "Extracting {i} of {n}…",
   summary: "{files} files, {total} in total, packed into {packed}",
   smaller: "{pct}% smaller",
   lockedNote: "Locked with a password",
@@ -99,6 +108,15 @@ const en = {
 type Dict = typeof en;
 
 const bn: Dict = {
+  sfxFormat: "EXE",
+  noSpace: "যথেষ্ট জায়গা নেই। দরকার {need}, খালি আছে মাত্র {free}। কিছু জায়গা খালি করুন বা অন্য ড্রাইভ বাছুন।",
+  sfxHint: "নিজে নিজে খুলে যাওয়া একটা প্রোগ্রাম। যাকে পাঠাবেন সে শুধু ডাবল-ক্লিক করবে, কোনো অ্যাপ লাগবে না। শুধু Windows-এ।",
+  sfxToast: "হয়ে গেছে! {name} যেকোনো Windows কম্পিউটারে নিজে নিজে খুলবে।",
+  rightClick: "ডান-ক্লিক মেনু",
+  rightClickOn: "Zipkoo আপনার ডান-ক্লিক মেনুতে আছে।",
+  rightClickOff: "Zipkoo-কে ডান-ক্লিক মেনুতে যোগ করুন।",
+  rightClickMac: "Finder: ডান-ক্লিক › Quick Actions।",
+  extractingN: "{n}টার মধ্যে {i} নম্বর এক্সট্র্যাক্ট হচ্ছে…",
   summary: "{files}টা ফাইল, মোট {total}, প্যাক হয়ে {packed}",
   smaller: "{pct}% ছোট",
   lockedNote: "পাসওয়ার্ড দিয়ে লক করা",

@@ -1,15 +1,25 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { FORMAT_EXT, type Level, type PackRequest } from "../api";
+import { FORMAT_EXT, suggestPackOutput, type Level, type PackRequest } from "../api";
 import type { Lang, makeT } from "../i18n";
-import { baseName, dirName, num, sep, toBn } from "../util";
+import { baseName, num, toBn } from "../util";
 
-type CreateFormat = PackRequest["format"];
+/** What the user picks; "sfx" is a ZIP payload inside a self-extracting .exe. */
+type Choice = PackRequest["format"] | "sfx";
+
+const EXT: Record<Choice, string> = { ...FORMAT_EXT, sfx: "exe" };
+
+export interface PackPreset {
+  lock?: boolean;
+  sfx?: boolean;
+}
 
 interface Props {
   t: ReturnType<typeof makeT>;
   lang: Lang;
   inputs: string[];
+  sfxEnabled: boolean;
+  preset?: PackPreset;
   onCancel: () => void;
   onStart: (req: PackRequest) => void;
 }
@@ -22,55 +32,59 @@ const SPLITS: { label: string; bytes: number | null }[] = [
   { label: "4 GB", bytes: 4 * 1024 ** 3 - 1 },
 ];
 
-function defaultOutput(inputs: string[], format: CreateFormat) {
-  const first = inputs[0];
-  const s = sep(first);
-  const b = baseName(first);
-  const name = inputs.length === 1 ? b.replace(/\.[^.]+$/, "") || b : "Archive";
-  return `${dirName(first)}${s}${name || "Archive"}.${FORMAT_EXT[format]}`;
-}
-
-export function PackSheet({ t, lang, inputs, onCancel, onStart }: Props) {
-  const [format, setFormat] = useState<CreateFormat>("zip");
+export function PackSheet({ t, lang, inputs, sfxEnabled, preset, onCancel, onStart }: Props) {
+  const [choice, setChoice] = useState<Choice>(preset?.sfx && sfxEnabled ? "sfx" : "zip");
   const [level, setLevel] = useState<Level>("normal");
   const [smart, setSmart] = useState(true);
-  const [lock, setLock] = useState(false);
+  const [lock, setLock] = useState(!!preset?.lock);
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [hideNames, setHideNames] = useState(true);
   const [split, setSplit] = useState(0);
   const [customOut, setCustomOut] = useState<string | null>(null);
+  const [suggested, setSuggested] = useState<string>("");
 
-  const output = useMemo(() => {
-    if (!customOut) return defaultOutput(inputs, format);
-    return customOut.replace(/\.(zip|7z|tar\.zst)$/i, "") + "." + FORMAT_EXT[format];
-  }, [customOut, inputs, format]);
+  useEffect(() => {
+    let live = true;
+    suggestPackOutput(inputs, EXT[choice])
+      .then((p) => live && p && setSuggested(p))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [inputs, choice]);
 
-  const canLock = format !== "tar-zst";
+  const output = customOut ? customOut.replace(/\.(zip|7z|tar\.zst|exe)$/i, "") + "." + EXT[choice] : suggested;
+
+  const canLock = choice !== "tar-zst";
+  const canSplit = choice !== "sfx";
   const pwError = lock && canLock ? (pw.length < 6 ? t("pwShort") : pw !== pw2 ? t("pwMismatch") : null) : null;
   const showPwError = lock && (pw.length > 0 || pw2.length > 0) && pwError;
 
   const pick = async () => {
-    const p = await save({ defaultPath: output, filters: [{ name: "Archive", extensions: [FORMAT_EXT[format].split(".").pop()!] }] });
+    const p = await save({ defaultPath: output, filters: [{ name: "Archive", extensions: [EXT[choice].split(".").pop()!] }] });
     if (p) setCustomOut(p);
   };
 
   const submit = (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (pwError) return;
+    if (pwError || !output) return;
+    const sfx = choice === "sfx";
     onStart({
       inputs,
       output,
-      format,
+      format: sfx ? "zip" : choice,
       level,
       smart,
       password: lock && canLock ? pw : null,
-      hideNames: format === "seven-z" && hideNames,
-      splitSize: SPLITS[split].bytes,
+      hideNames: choice === "seven-z" && hideNames,
+      splitSize: canSplit ? SPLITS[split].bytes : null,
+      sfx,
     });
   };
 
-  const hints: Record<CreateFormat, string> = { zip: t("zipHint"), "seven-z": t("szHint"), "tar-zst": t("tzHint") };
+  const choices: Choice[] = sfxEnabled ? ["zip", "seven-z", "tar-zst", "sfx"] : ["zip", "seven-z", "tar-zst"];
+  const hints: Record<Choice, string> = { zip: t("zipHint"), "seven-z": t("szHint"), "tar-zst": t("tzHint"), sfx: t("sfxHint") };
   const n = inputs.length;
 
   return (
@@ -85,13 +99,13 @@ export function PackSheet({ t, lang, inputs, onCancel, onStart }: Props) {
         <fieldset>
           <legend>{t("format")}</legend>
           <div className="seg" role="radiogroup">
-            {(["zip", "seven-z", "tar-zst"] as CreateFormat[]).map((f) => (
-              <button type="button" key={f} role="radio" aria-checked={format === f} className={format === f ? "on" : ""} onClick={() => setFormat(f)}>
-                {FORMAT_EXT[f].toUpperCase()}
+            {choices.map((f) => (
+              <button type="button" key={f} role="radio" aria-checked={choice === f} className={choice === f ? "on" : ""} onClick={() => setChoice(f)}>
+                {f === "sfx" ? t("sfxFormat") : FORMAT_EXT[f].toUpperCase()}
               </button>
             ))}
           </div>
-          <p className="hint">{hints[format]}</p>
+          <p className="hint">{hints[choice]}</p>
         </fieldset>
 
         <fieldset>
@@ -121,36 +135,38 @@ export function PackSheet({ t, lang, inputs, onCancel, onStart }: Props) {
             <input id="pw1" type="password" autoComplete="new-password" placeholder={t("password")} value={pw} onChange={(e) => setPw(e.target.value)} />
             <input id="pw2" type="password" autoComplete="new-password" placeholder={t("repeatPassword")} value={pw2} onChange={(e) => setPw2(e.target.value)} />
             {showPwError && <p className="err small">{pwError}</p>}
-            {format === "seven-z" && (
+            {choice === "seven-z" && (
               <label className="check small">
                 <input id="hide-names" type="checkbox" checked={hideNames} onChange={(e) => setHideNames(e.target.checked)} />
                 {t("hideNames")}
               </label>
             )}
-            {format === "zip" && <p className="hint">{t("lockZipNote")}</p>}
+            {choice === "zip" && <p className="hint">{t("lockZipNote")}</p>}
           </div>
         )}
 
-        <fieldset>
-          <legend>{t("split")}</legend>
-          <div className="seg wrap" role="radiogroup">
-            {SPLITS.map((s, i) => (
-              <button type="button" key={s.label} role="radio" aria-checked={split === i} className={split === i ? "on" : ""} onClick={() => setSplit(i)}>
-                {i === 0 ? t("noSplit") : s.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
+        {canSplit && (
+          <fieldset>
+            <legend>{t("split")}</legend>
+            <div className="seg wrap" role="radiogroup">
+              {SPLITS.map((s, i) => (
+                <button type="button" key={s.label} role="radio" aria-checked={split === i} className={split === i ? "on" : ""} onClick={() => setSplit(i)}>
+                  {i === 0 ? t("noSplit") : s.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
 
         <div className="saveas">
           <span className="saveas-label">{t("saveAs")}</span>
-          <span className="mono small path" title={output}>{output}</span>
+          <span className="mono small path" title={output}><bdi>{output}</bdi></span>
           <button type="button" className="btn quiet small" onClick={pick}>{t("change")}</button>
         </div>
 
         <div className="row gap end">
           <button type="button" className="btn quiet" onClick={onCancel}>{t("cancel")}</button>
-          <button type="submit" className="btn primary" disabled={!!pwError}>{t("zipIt")}</button>
+          <button type="submit" className="btn primary" disabled={!!pwError || !output}>{t("zipIt")}</button>
         </div>
       </form>
     </div>

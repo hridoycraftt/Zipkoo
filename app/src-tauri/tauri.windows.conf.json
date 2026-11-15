@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "resources": {
+      "../../target/release/zipkoo-sfx.exe": "zipkoo-sfx.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { asUiError, FORMAT_LABEL, peekFile, type ArchiveInfo, type Entry } from "../api";
 import type { Lang, makeT } from "../i18n";
 import { baseName, human, mimeFor, num, previewKind } from "../util";
@@ -71,6 +71,21 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
     };
   }, [focus, info.path, password, t]);
 
+  // Only the rows on screen are rendered, so archives with 100,000+ entries scroll smoothly.
+  const ROW = 56;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState({ top: 0, height: 800 });
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setView((v) => ({ ...v, height: el.clientHeight })));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const first = Math.max(0, Math.floor(view.top / ROW) - 8);
+  const last = Math.min(rows.length, Math.ceil((view.top + view.height) / ROW) + 8);
+  const visible = rows.slice(first, last);
+
   const toggle = (name: string) => {
     const next = new Set(selected);
     next.has(name) ? next.delete(name) : next.add(name);
@@ -132,9 +147,10 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
             <span role="columnheader" className="c-size">{t("size")}</span>
             <span role="columnheader" className="c-size">{t("packed")}</span>
           </div>
-          <div className="list-body">
+          <div className="list-body" ref={bodyRef} onScroll={(ev) => { const top = ev.currentTarget.scrollTop; setView((v) => ({ ...v, top })); }}>
             {rows.length === 0 && <p className="empty">{t("noMatch", { q: query })}</p>}
-            {rows.map((e) => {
+            <div style={{ height: first * ROW }} aria-hidden="true" />
+            {visible.map((e) => {
               const fi = fileIcon(e.name, e.is_dir);
               const parts = e.name.replace(/\/$/, "").split("/");
               const leaf = parts.pop();
@@ -174,6 +190,7 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
                 </div>
               );
             })}
+            <div style={{ height: (rows.length - last) * ROW }} aria-hidden="true" />
           </div>
         </div>
 

@@ -1,10 +1,13 @@
 //! Tauri commands that expose zipkoo-core to the UI.
+pub mod shell;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
+use shell::{Inbox, ShellAction};
 use zipkoo_core::{ArchiveInfo, ExtractOptions, ExtractReport, Format, Level, PackOptions, PackReport, Progress};
 
 #[derive(Default)]
@@ -24,6 +27,7 @@ impl From<zipkoo_core::Error> for UiError {
             E::PasswordRequired => "password_required",
             E::WrongPassword => "wrong_password",
             E::TooLarge { .. } => "too_large",
+            E::NoSpace { .. } => "no_space",
             E::Cancelled => "cancelled",
             E::UnsupportedFormat(_) => "unsupported",
             E::Damaged(_) => "damaged",
@@ -50,6 +54,9 @@ struct PackRequest {
     password: Option<String>,
     hide_names: bool,
     split_size: Option<u64>,
+    /// Build a self-extracting program instead of a plain archive (ZIP payload).
+    #[serde(default)]
+    sfx: bool,
 }
 
 #[derive(Deserialize)]
@@ -103,6 +110,12 @@ async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: Pac
         let mut emit = |p: &Progress| {
             let _ = app.emit("job-progress", JobEvent { job: &job2, progress: p });
         };
+        if req.sfx {
+            let stub = sfx_stub(&app).ok_or_else(|| {
+                zipkoo_core::Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "The self-extracting stub is missing from this install."))
+            })?;
+            return zipkoo_core::sfx::build(&stub, &req.inputs, &req.output, &opts, &mut emit, Some(&cancel));
+        }
         zipkoo_core::pack(&req.inputs, &req.output, &opts, &mut emit, Some(&cancel))
     })
     .await
@@ -149,24 +162,134 @@ async fn hash_file(path: PathBuf) -> Result<String, UiError> {
         .map_err(|e| UiError { code: "error", message: e.to_string() })
 }
 
-/// Paths the app was launched with ("Open with Zipkoo", file associations).
+/// Where the SFX stub lives: bundled as a resource on Windows, next to the binary in dev builds.
+fn sfx_stub(app: &AppHandle) -> Option<PathBuf> {
+    let name = if cfg!(windows) { "zipkoo-sfx.exe" } else { "zipkoo-sfx" };
+    let mut candidates = Vec::new();
+    if let Ok(p) = app.path().resolve(name, tauri::path::BaseDirectory::Resource) {
+        candidates.push(p);
+    }
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+        candidates.push(dir.join(name));
+        candidates.push(dir.join("../release").join(name));
+    }
+    if let Some(p) = std::env::var_os("ZIPKOO_SFX_STUB") {
+        candidates.insert(0, PathBuf::from(p));
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 #[tauri::command]
-fn launch_paths() -> Vec<String> {
-    std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect()
+fn sfx_available(app: AppHandle) -> bool {
+    // Self-extracting programs are a Windows convention; macOS blocks unsigned downloaded apps.
+    (cfg!(windows) || std::env::var_os("ZIPKOO_SFX_STUB").is_some()) && sfx_stub(&app).is_some()
+}
+
+/// A free output path next to the first input: "Photos.zip", or "Photos (2).zip" if taken.
+#[tauri::command]
+fn suggest_pack_output(inputs: Vec<PathBuf>, ext: String) -> Option<PathBuf> {
+    let first = inputs.first()?;
+    let parent = first.parent()?.to_path_buf();
+    let name = if inputs.len() == 1 {
+        let n = first.file_name()?.to_string_lossy().into_owned();
+        if first.is_dir() { n } else { first.file_stem()?.to_string_lossy().into_owned() }
+    } else {
+        parent.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Archive".into())
+    };
+    Some(zipkoo_core::unique_path(&parent.join(format!("{name}.{ext}"))))
+}
+
+#[derive(Serialize)]
+struct ExtractTarget {
+    /// Folder to extract into.
+    dest: PathBuf,
+    /// Folder the user will see afterwards.
+    result: PathBuf,
+}
+
+/// "Extract here": skip the extra folder when the archive already has one top folder.
+#[tauri::command]
+async fn suggest_extract_dest(path: PathBuf, password: Option<String>) -> Result<ExtractTarget, UiError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let info = zipkoo_core::inspect(&path, password.as_deref())?;
+        let (dest, result) = zipkoo_core::suggest_dest(&path, &info);
+        Ok::<_, zipkoo_core::Error>(ExtractTarget { dest, result })
+    })
+    .await
+    .map_err(|e| UiError { code: "error", message: e.to_string() })?
+    .map_err(Into::into)
+}
+
+#[derive(Serialize)]
+struct ShellStatus {
+    supported: bool,
+    installed: bool,
+}
+
+#[tauri::command]
+fn shell_status() -> ShellStatus {
+    ShellStatus { supported: shell::supported(), installed: shell::is_installed() }
+}
+
+#[tauri::command]
+fn shell_set(enabled: bool) -> Result<ShellStatus, UiError> {
+    let r = if enabled { shell::install() } else { shell::uninstall() };
+    r.map_err(|e| UiError { code: "error", message: e.to_string() })?;
+    Ok(shell_status())
+}
+
+/// Clicks from the right-click menu that are ready for the UI.
+#[derive(Default)]
+struct Pending(Mutex<Vec<ShellAction>>);
+
+#[tauri::command]
+fn take_shell_actions(pending: State<'_, Pending>) -> Vec<ShellAction> {
+    std::mem::take(&mut *pending.0.lock().unwrap())
+}
+
+fn receive(app: &AppHandle, args: Vec<String>) {
+    if let Some(a) = shell::parse_args(args) {
+        app.state::<Inbox>().push(a);
+    }
+}
+
+fn bring_to_front(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: a second launch (a right-click on another file) hands its args to us.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            receive(app, argv.into_iter().skip(1).collect());
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Jobs::default())
+        .manage(Inbox::default())
+        .manage(Pending::default())
         .setup(|app| {
             #[cfg(debug_assertions)]
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("Zipkoo (dev)");
             }
-            let _ = app;
+            receive(app.handle(), std::env::args().skip(1).collect());
+            // Move merged clicks to the UI once their merge window closes.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_millis(120));
+                let ready = handle.state::<Inbox>().take_ready();
+                if !ready.is_empty() {
+                    handle.state::<Pending>().0.lock().unwrap().extend(ready);
+                    bring_to_front(&handle);
+                    let _ = handle.emit("shell-actions", ());
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -176,8 +299,21 @@ pub fn run() {
             extract_archive,
             cancel_job,
             hash_file,
-            launch_paths
+            sfx_available,
+            suggest_pack_output,
+            suggest_extract_dest,
+            shell_status,
+            shell_set,
+            take_shell_actions
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Zipkoo");
+        .build(tauri::generate_context!())
+        .expect("error while building Zipkoo")
+        .run(|_app, _event| {
+            // Finder opening a file with Zipkoo (double-click on a .zip, "Open With").
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &_event {
+                let paths: Vec<String> = urls.iter().filter_map(|u| u.to_file_path().ok()).map(|p| p.display().to_string()).collect();
+                receive(_app, paths);
+            }
+        });
 }

@@ -35,6 +35,9 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
         working-directory: app
+      - name: Build the self-extracting stub (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: cargo build --release -p zipkoo-sfx
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

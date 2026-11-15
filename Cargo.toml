@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/zipkoo-core", "crates/zipkoo-cli", "app/src-tauri"]
+members = ["crates/zipkoo-core", "crates/zipkoo-cli", "crates/zipkoo-sfx", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

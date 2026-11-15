@@ -52,9 +52,12 @@ pub struct Budget {
 }
 
 impl Budget {
-    /// Allow up to `ratio` times the archive size, and never less than `floor`.
-    pub fn for_archive(archive_size: u64, ratio: u64, floor: u64, hard_cap: Option<u64>) -> Self {
-        let mut limit = archive_size.saturating_mul(ratio).max(floor);
+    /// Allow up to `ratio` times the archive size, at least `floor`, and at least what the archive
+    /// honestly declares (plus 1 MB slack). Declared sizes are checked against free disk space before
+    /// extraction starts, so an archive cannot claim terabytes and fill the disk; one that lies about
+    /// its sizes is stopped here when its real output passes the limit.
+    pub fn for_archive(archive_size: u64, ratio: u64, floor: u64, declared: u64, hard_cap: Option<u64>) -> Self {
+        let mut limit = archive_size.saturating_mul(ratio).max(floor).max(declared.saturating_add(1 << 20));
         if let Some(cap) = hard_cap {
             limit = limit.min(cap);
         }
@@ -108,6 +111,17 @@ mod tests {
         assert!(safe_join(d, "..\\..\\win.ini").is_err());
         assert_eq!(safe_join(d, "a/b.txt").unwrap(), Path::new("/tmp/out/a/b.txt"));
         assert_eq!(safe_join(d, "./a\\b.txt").unwrap(), Path::new("/tmp/out/a/b.txt"));
+    }
+
+    #[test]
+    fn budget_catches_lying_sizes() {
+        // A 1 KB archive that declares 100 bytes but tries to write 2 MB.
+        let mut b = Budget::for_archive(1024, 10, 0, 100, None);
+        assert!(b.charge(1 << 20).is_ok());
+        assert!(matches!(b.charge(1 << 20), Err(Error::TooLarge { .. })));
+        // Honest big output is allowed.
+        let mut b = Budget::for_archive(1024, 10, 0, 50 << 20, None);
+        assert!(b.charge(50 << 20).is_ok());
     }
 
     #[test]
