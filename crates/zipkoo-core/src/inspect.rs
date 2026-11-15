@@ -46,7 +46,25 @@ pub(crate) fn open_zip(path: &Path) -> Result<zip::ZipArchive<Box<dyn ReadSeek>>
 
 /// Resolve split parts to a single readable file. Keep the returned guard alive while reading:
 /// it deletes the joined temporary copy when dropped.
+/// "Movie.part3.rar" → "Movie.part1.rar" (same zero padding), when that first part exists.
+pub fn rar_first_volume(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_str()?;
+    let lower = name.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".rar")?;
+    let idx = stem.rfind(".part")?;
+    let digits = &stem[idx + 5..];
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || digits.trim_start_matches('0') == "1" {
+        return None;
+    }
+    let first = format!("{}{:0width$}.rar", &name[..idx + 5], 1, width = digits.len());
+    let p = path.with_file_name(first);
+    p.exists().then_some(p)
+}
+
 pub(crate) fn resolve(path: &Path) -> Result<(PathBuf, Format, u64, Option<split::TempDir>)> {
+    if let Some(first) = rar_first_volume(path) {
+        return resolve(&first);
+    }
     let (real, size, guard) = if split::is_first_part(path) {
         let total: u64 = split::parts_of(path)?
             .iter()
@@ -92,7 +110,7 @@ pub(crate) fn tar_reader(path: &Path, fmt: Format) -> Result<Box<dyn Read>> {
         Format::TarZst => Box::new(zstd::stream::read::Decoder::new(f)?),
         Format::TarBz2 => Box::new(bzip2::read::MultiBzDecoder::new(f)),
         Format::TarXz => Box::new(liblzma::read::XzDecoder::new_multi_decoder(f)),
-        _ => unreachable!(),
+        other => return Err(Error::UnsupportedFormat(other.label().into())),
     })
 }
 
@@ -149,6 +167,12 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
                     executable: false,
                 });
             }
+        }
+        f if f.is_simple() => {
+            crate::formats::walk(&real, f, false, &mut |it| {
+                entries.push(Entry { name: it.name, size: it.size, packed: None, is_dir: it.is_dir, encrypted: false, executable: false });
+                Ok(true)
+            })?;
         }
         _ => {
             let mut t = tar::Archive::new(tar_reader(&real, format)?);
@@ -226,6 +250,21 @@ pub fn peek(path: &Path, name: &str, password: Option<&str>, max_bytes: u64) -> 
                 a = h.skip()?;
             }
             Err(Error::EntryNotFound(name.into()))
+        }
+        f if f.is_simple() => {
+            let mut found: Option<Result<Vec<u8>>> = None;
+            crate::formats::walk(&real, f, true, &mut |it| {
+                if it.name != name {
+                    return Ok(true);
+                }
+                let mut out = Vec::new();
+                if let Some(r) = it.reader {
+                    r.take(max_bytes + 1).read_to_end(&mut out)?;
+                }
+                found = Some(if out.len() as u64 > max_bytes { Err(too_big()) } else { Ok(out) });
+                Ok(false)
+            })?;
+            found.unwrap_or_else(|| Err(Error::EntryNotFound(name.into())))
         }
         _ => {
             let mut t = tar::Archive::new(tar_reader(&real, format)?);

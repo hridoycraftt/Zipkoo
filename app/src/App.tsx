@@ -8,7 +8,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { applyTheme, loadSettings, saveSettings, type Settings } from "./settings";
 import { SettingsView } from "./components/SettingsView";
 import {
-  EDITABLE, appInfo, editArchive, extractConflicts, trashPath, openEntry, prepareDrag, type Change, type Entry,
+  ARCHIVE_EXTS, EDITABLE, appInfo, editArchive, extractConflicts, trashPath, openEntry, prepareDrag, type Change, type Entry,
   cloudFolders, convertArchives, shareFile, updateArchive, type CloudFolder,
   asUiError, cancelJob, extractArchive, inspectArchive, isArchive, onProgress, onShellActions, packFiles, sfxAvailable,
   shellSet, shellStatus, suggestExtractDest, suggestPackOutput, takeShellActions,
@@ -457,7 +457,7 @@ export default function App() {
     const res = await openDialog({
       multiple: kind === "files",
       directory: kind === "folder",
-      filters: kind === "archive" ? [{ name: "Archives", extensions: ["zip", "7z", "rar", "tar", "gz", "tgz", "zst", "tzst", "bz2", "xz", "001", "exe"] }] : undefined,
+      filters: kind === "archive" ? [{ name: "Archives", extensions: ARCHIVE_EXTS }] : undefined,
     });
     if (!res) return;
     const paths = Array.isArray(res) ? res : [res];

@@ -35,7 +35,7 @@ fn stamp(p: &Path) -> Option<(i64, i64)> {
     Some((m.len() as i64, t))
 }
 
-const EXTS: &[&str] = &["zip", "7z", "rar", "tar", "tgz", "gz", "zst", "tzst", "bz2", "tbz2", "xz", "txz"];
+const EXTS: &[&str] = &["zip", "zipx", "7z", "rar", "tar", "tgz", "gz", "zst", "tzst", "bz2", "tbz2", "xz", "txz", "iso", "cab", "lzh", "lha"];
 
 /// Archives under `dir` (not following links). Split parts count once (.001).
 pub fn find_archives(dir: &Path, max_depth: usize) -> Vec<PathBuf> {

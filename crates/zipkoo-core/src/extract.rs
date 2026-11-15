@@ -281,6 +281,15 @@ pub fn extract(
                 }
             }
         }
+        f if f.is_simple() => {
+            crate::formats::walk(&real, f, true, &mut |it| {
+                let Some(out) = ctx.target(&it.name, it.is_dir)? else { return Ok(true) };
+                if let Some(r) = it.reader {
+                    ctx.write(&out, r)?;
+                }
+                Ok(true)
+            })?;
+        }
         _ => {
             let mut t = tar::Archive::new(tar_reader(&real, format)?);
             for e in t.entries()? {
@@ -518,6 +527,30 @@ pub fn test(path: &Path, password: Option<&str>, on_progress: &mut dyn FnMut(&Pr
                 } else {
                     h.skip()?
                 };
+            }
+        }
+        f if f.is_simple() => {
+            let res = crate::formats::walk(&real, f, true, &mut |it| {
+                if let Some(rd) = it.reader {
+                    rep.set_current(&it.name);
+                    match sink(rd, &mut rep) {
+                        Ok(n) => {
+                            r.files += 1;
+                            r.bytes += n;
+                        }
+                        Err(e) if e.to_string().contains("zipkoo: cancelled") => return Err(Error::Cancelled),
+                        Err(e) => {
+                            r.errors.push((it.name.clone(), e.to_string()));
+                            return Ok(false);
+                        }
+                    }
+                }
+                Ok(true)
+            });
+            match res {
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                Err(e) => r.errors.push(("(archive)".into(), e.to_string())),
+                Ok(()) => {}
             }
         }
         _ => {

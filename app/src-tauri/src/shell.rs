@@ -22,7 +22,7 @@ pub const ARCHIVE_ITEMS: &[Item] = &[
 ];
 
 pub const ARCHIVE_EXTS: &[&str] = &[
-    "zip", "7z", "rar", "tar", "gz", "tgz", "zst", "tzst", "bz2", "tbz2", "xz", "txz", "001",
+    "zip", "zipx", "7z", "rar", "tar", "gz", "tgz", "zst", "tzst", "bz2", "tbz2", "xz", "txz", "001", "iso", "cab", "lzh", "lha",
 ];
 
 pub fn is_installed() -> bool {

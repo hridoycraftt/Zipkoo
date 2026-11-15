@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-export type Format = "zip" | "seven-z" | "tar" | "tar-gz" | "tar-zst" | "tar-bz2" | "tar-xz" | "rar";
+export type Format = "zip" | "seven-z" | "tar" | "tar-gz" | "tar-zst" | "tar-bz2" | "tar-xz" | "rar" | "gz" | "xz" | "bz2" | "zst" | "iso" | "cab" | "lzh";
 export type Level = "fast" | "normal" | "max";
 
 export interface Entry {
@@ -63,6 +63,7 @@ export function asUiError(e: unknown): UiError {
 export const FORMAT_LABEL: Record<Format, string> = {
   zip: "ZIP", "seven-z": "7Z", tar: "TAR", "tar-gz": "TAR.GZ", "tar-zst": "TAR.ZST",
   "tar-bz2": "TAR.BZ2", "tar-xz": "TAR.XZ", rar: "RAR",
+  gz: "GZ", xz: "XZ", bz2: "BZ2", zst: "ZST", iso: "ISO", cab: "CAB", lzh: "LZH",
 };
 export const FORMAT_EXT: Record<"zip" | "seven-z" | "tar-zst", string> = { zip: "zip", "seven-z": "7z", "tar-zst": "tar.zst" };
 
@@ -120,7 +121,8 @@ export function onProgress(cb: (job: string, p: Progress) => void): Promise<Unli
   return listen<{ job: string; progress: Progress }>("job-progress", (e) => cb(e.payload.job, e.payload.progress));
 }
 
-const ARCHIVE_RE = /\.(zip|7z|rar|tar|tgz|tzst|tbz2|txz|gz|zst|bz2|xz|001)$/i;
+const ARCHIVE_RE = /\.(zip|zipx|7z|rar|tar|tgz|tzst|tbz2|txz|gz|zst|bz2|xz|001|iso|cab|lzh|lha)$/i;
+export const ARCHIVE_EXTS = ["zip", "zipx", "7z", "rar", "tar", "gz", "tgz", "zst", "tzst", "bz2", "tbz2", "xz", "txz", "001", "iso", "cab", "lzh", "lha", "exe"];
 export const isArchive = (p: string) => ARCHIVE_RE.test(p);
 
 // ---------- Features 6–12 ----------

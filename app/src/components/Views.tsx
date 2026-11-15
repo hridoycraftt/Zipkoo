@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-  asUiError, convertArchives, findDuplicates, healCheck, testArchive, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
+  ARCHIVE_EXTS, asUiError, convertArchives, findDuplicates, healCheck, testArchive, healCreate, healStatus, indexRefresh, listArchives, onEvent, searchArchives,
   shareDelete, shareDownload, sharesList, watchRemove, watchRunNow, watchSave, watchesList,
   type CloudFolder, type DupGroup, type FolderItem, type Health, type Hit, type IndexStats, type ShareRecord, type Watch,
 } from "../api";
@@ -400,7 +400,7 @@ export function ToolsView({ ctx }: { ctx: ViewCtx }) {
   const [repairTarget, setRepairTarget] = useState<string | null>(null);
 
   const convert = async () => {
-    const res = await openDialog({ multiple: true, filters: [{ name: "Archives", extensions: ["zip", "7z", "rar", "tar", "gz", "tgz", "zst", "tzst", "bz2", "xz", "001"] }] });
+    const res = await openDialog({ multiple: true, filters: [{ name: "Archives", extensions: ARCHIVE_EXTS }] });
     if (!res) return;
     const files = Array.isArray(res) ? res : [res];
     const r = await ctx.runJob(t("converting"), (id) => convertArchives(id, files, to));
@@ -417,7 +417,7 @@ export function ToolsView({ ctx }: { ctx: ViewCtx }) {
     if (r) setDupes(r);
   };
   const pickRepair = async () => {
-    const f = await openDialog({ filters: [{ name: "Archives", extensions: ["zip", "7z", "rar", "tar", "gz", "zst", "bz2", "xz", "exe"] }] });
+    const f = await openDialog({ filters: [{ name: "Archives", extensions: ARCHIVE_EXTS }] });
     if (f && !Array.isArray(f)) setRepairTarget(f);
   };
   const wasted = dupes?.reduce((a, g) => a + g.wasted, 0) ?? 0;

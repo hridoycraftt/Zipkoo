@@ -46,7 +46,8 @@
     "fileAssociations": [
       {
         "ext": [
-          "zip"
+          "zip",
+          "zipx"
         ],
         "name": "ZIP archive",
         "role": "Editor"
@@ -73,9 +74,21 @@
           "zst",
           "tzst",
           "bz2",
-          "xz"
+          "tbz2",
+          "xz",
+          "txz"
         ],
-        "name": "TAR archive",
+        "name": "Compressed archive",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "iso",
+          "cab",
+          "lzh",
+          "lha"
+        ],
+        "name": "Disc image or archive",
         "role": "Viewer"
       },
       {
