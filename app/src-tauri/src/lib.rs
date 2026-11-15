@@ -79,7 +79,7 @@ struct ExtractRequest {
 
 fn register(jobs: &Jobs, id: &str) -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
-    jobs.0.lock().unwrap().insert(id.to_string(), flag.clone());
+    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), flag.clone());
     flag
 }
 
@@ -122,10 +122,18 @@ async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: Pac
         let shrink_dir = req.shrink_photos.then(|| zipkoo_core::unique_path(&parent.join(".zipkoo-shrink")));
         let inputs: Vec<PathBuf> = match &shrink_dir {
             Some(dir) => {
-                zipkoo_core::optimize::optimize(&req.inputs, dir, &Default::default())?;
-                let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-                v.sort();
-                v
+                let prepared = zipkoo_core::optimize::optimize(&req.inputs, dir, &Default::default()).and_then(|_| {
+                    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+                    v.sort();
+                    Ok(v)
+                });
+                match prepared {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let _ = std::fs::remove_dir_all(dir);
+                        return Err(e);
+                    }
+                }
             }
             None => req.inputs.clone(),
         };
@@ -150,7 +158,7 @@ async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: Pac
     })
     .await
     .map_err(|e| UiError { code: "error", message: e.to_string() })?;
-    jobs.0.lock().unwrap().remove(&job);
+    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).remove(&job);
     res.map_err(Into::into)
 }
 
@@ -173,13 +181,13 @@ async fn extract_archive(app: AppHandle, jobs: State<'_, Jobs>, job: String, req
     })
     .await
     .map_err(|e| UiError { code: "error", message: e.to_string() })?;
-    jobs.0.lock().unwrap().remove(&job);
+    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).remove(&job);
     res.map_err(Into::into)
 }
 
 #[tauri::command]
 fn cancel_job(jobs: State<'_, Jobs>, job: String) {
-    if let Some(f) = jobs.0.lock().unwrap().get(&job) {
+    if let Some(f) = jobs.0.lock().unwrap_or_else(|e| e.into_inner()).get(&job) {
         f.store(true, Ordering::Relaxed);
     }
 }
@@ -274,7 +282,7 @@ struct Pending(Mutex<Vec<ShellAction>>);
 
 #[tauri::command]
 fn take_shell_actions(pending: State<'_, Pending>) -> Vec<ShellAction> {
-    std::mem::take(&mut *pending.0.lock().unwrap())
+    std::mem::take(&mut *pending.0.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 fn receive(app: &AppHandle, args: Vec<String>) {
@@ -318,7 +326,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_millis(120));
                 let ready = handle.state::<Inbox>().take_ready();
                 if !ready.is_empty() {
-                    handle.state::<Pending>().0.lock().unwrap().extend(ready);
+                    handle.state::<Pending>().0.lock().unwrap_or_else(|e| e.into_inner()).extend(ready);
                     bring_to_front(&handle);
                     let _ = handle.emit("shell-actions", ());
                 }

@@ -106,20 +106,31 @@
     return crypto.subtle.importKey("raw", k, "AES-GCM", false, ["decrypt"]);
   }
 
-  let pending = null; // {read, header} waiting for a password
+  // Check the password against the header first (doesn't count as a download), then download.
+  async function checkHead() {
+    const r = await fetch(`/api/shares/${id}/head`, { cache: "no-store" });
+    if (!r.ok) throw new Error("gone");
+    const head = new Uint8Array(await r.arrayBuffer());
+    if (head.length < 45 || new TextDecoder().decode(head.slice(0, 5)) !== "ZKSHR") throw new Error("magic");
+    const header = head.slice(0, 45);
+    const dv = new DataView(header.buffer);
+    const prefix = header.slice(13, 21), metaLen = dv.getUint32(41, true);
+    if ((header[12] & 1) && !$("pw").value) return "need-password";
+    try {
+      const key = await deriveKey(header, $("pw").value);
+      await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(prefix, 0xffffffff), additionalData: header }, key, head.slice(45, 45 + metaLen));
+      return "ok";
+    } catch {
+      return header[12] & 1 ? "wrong-password" : "bad-key";
+    }
+  }
 
   async function proceed(read, header) {
     const dv = new DataView(header.buffer, header.byteOffset);
     const chunk = dv.getUint32(8, true), prefix = header.slice(13, 21), metaLen = dv.getUint32(41, true);
     const metaCt = await read(metaLen);
-    let key, meta;
-    try {
-      key = await deriveKey(header, $("pw").value);
-      meta = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(prefix, 0xffffffff), additionalData: header }, key, metaCt)));
-    } catch {
-      if (header[12] & 1) { pending = { read, header, metaCt }; say("Wrong password. Check Caps Lock and try again.", "err"); $("go").disabled = false; $("go").textContent = "Unlock and download"; return; }
-      throw new Error("key");
-    }
+    const key = await deriveKey(header, $("pw").value);
+    const meta = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(prefix, 0xffffffff), additionalData: header }, key, metaCt)));
     const name = (meta.name || "shared-file").split(/[\\/]/).pop();
     $("title").textContent = name;
     let sink = null; const parts = [];
@@ -152,29 +163,25 @@
   $("go").addEventListener("click", async () => {
     $("go").disabled = true;
     try {
-      if (pending) {
-        const p = pending; pending = null;
-        say("Checking the password…");
-        const read = async (n) => { if (p.metaCt) { const m = p.metaCt; p.metaCt = null; if (m.length === n) return m; } return p.read(n); };
-        return await proceed(read, p.header);
-      }
-      say("Starting…");
-      const r = await fetch(`/api/shares/${id}/blob`, { cache: "no-store" });
-      if (!r.ok) { say("This link has expired, reached its download limit, or was deleted.", "err"); return; }
-      const read = exactReader(r.body);
-      const header = await read(45);
-      const magic = new TextDecoder().decode(header.slice(0, 5));
-      if (magic !== "ZKSHR") throw new Error("magic");
-      if ((header[12] & 1) && !$("pw").value) {
-        pending = { read, header };
+      say("Checking…");
+      const state = await checkHead();
+      if (state === "need-password") {
         $("pwform").hidden = false; $("pw").focus();
         $("go").textContent = "Unlock and download"; $("go").disabled = false;
         say("Enter the password to continue.");
         return;
       }
-      await proceed(read, header);
+      if (state === "wrong-password") { say("Wrong password. Check Caps Lock and try again.", "err"); $("go").disabled = false; return; }
+      if (state === "bad-key") throw new Error("key");
+      const r = await fetch(`/api/shares/${id}/blob`, { cache: "no-store" });
+      if (!r.ok) { say("This link has expired, reached its download limit, or was deleted.", "err"); return; }
+      const read = exactReader(r.body);
+      await proceed(read, await read(45));
     } catch (e) {
-      say(e && e.message === "key" ? "This link's key doesn't match the file. Ask the sender for the full link." : "The file couldn't be unlocked. It may have been changed or the download stopped early.", "err");
+      const m = e && e.message;
+      say(m === "key" ? "This link's key doesn't match the file. Ask the sender for the full link."
+        : m === "gone" ? "This link has expired, reached its download limit, or was deleted."
+        : "The file couldn't be unlocked. It may have been changed or the download stopped early.", "err");
       $("go").disabled = false;
     }
   });

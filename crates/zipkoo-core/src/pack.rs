@@ -227,10 +227,15 @@ fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Repor
                     continue;
                 }
                 rep.set_current(&it.name);
-                let mut file = File::open(&it.src)?;
+                let file = File::open(&it.src)?;
                 let mut header = tar::Header::new_gnu();
-                header.set_metadata(&file.metadata()?);
-                let mut r = CountingReader { inner: &mut file, reporter: rep };
+                let meta = file.metadata()?;
+                header.set_metadata(&meta);
+                // The header promises `size` bytes. If the file grows or shrinks while we read it,
+                // write exactly that many (cut or zero-padded) so later entries stay intact.
+                let size = meta.len();
+                let exact = std::io::Read::take(std::io::Read::chain(std::io::Read::take(file, size), std::io::repeat(0)), size);
+                let mut r = CountingReader { inner: exact, reporter: rep };
                 tb.append_data(&mut header, &it.name, &mut r)?;
             }
             let enc = tb.into_inner()?;

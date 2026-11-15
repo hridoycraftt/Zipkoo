@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
+pub const ZIPKOO_DIR: &str = ".zipkoo/";
 pub const MANIFEST: &str = ".zipkoo/manifest.json";
 pub const HISTORY_DIR: &str = ".zipkoo/history/";
 
@@ -120,6 +121,10 @@ pub fn update(
     cancel: Option<&AtomicBool>,
 ) -> Result<UpdateReport> {
     use zip::write::SimpleFileOptions;
+    if let Some(pw) = opts.password {
+        // Never re-encrypt new files with a mistyped password.
+        crate::inspect::inspect(archive, Some(pw))?;
+    }
     let mut old = zip::ZipArchive::new(BufReader::new(File::open(archive)?))?;
     let mut manifest = read_manifest(archive)?;
     let wanted = collect(inputs)?;
@@ -250,6 +255,14 @@ pub fn update(
         Ok(r) => {
             drop(old);
             fs::rename(&tmp, archive)?;
+            // Repair data describes the old bytes; rebuild it so Self-heal never "repairs"
+            // the updated archive back to the old one.
+            let rec = crate::heal::recovery_path(archive);
+            if rec.exists() {
+                let pct = crate::heal::percent_of(&rec).unwrap_or(10);
+                let _ = fs::remove_file(&rec);
+                crate::heal::create(archive, pct, &mut |_| {}, None)?;
+            }
             rep.finish();
             Ok(r)
         }

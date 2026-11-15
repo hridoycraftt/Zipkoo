@@ -42,7 +42,12 @@ fn kind(p: &Path) -> Option<&'static str> {
 }
 
 fn shrink(src: &Path, dst: &Path, k: &str, o: &OptimizeOptions) -> image::ImageResult<()> {
-    let img = ImageReader::open(src)?.with_guessed_format()?.decode()?;
+    use image::ImageDecoder;
+    let mut decoder = ImageReader::open(src)?.with_guessed_format()?.into_decoder()?;
+    // Phones store rotation as an EXIF flag; apply it so shrunk photos aren't sideways.
+    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
     let img = if img.width().max(img.height()) > o.max_edge { img.resize(o.max_edge, o.max_edge, image::imageops::FilterType::Lanczos3) } else { img };
     match k {
         "png" => img.save_with_format(dst, image::ImageFormat::Png),
@@ -83,7 +88,7 @@ pub fn optimize(inputs: &[PathBuf], out_dir: &Path, o: &OptimizeOptions) -> Resu
                 continue;
             };
             r.images += 1;
-            let dst = if k == "webp" { dst.with_extension("jpg") } else { dst };
+            let dst = if k == "webp" { crate::pack::unique_path(&dst.with_extension("jpg")) } else { dst };
             let ok = shrink(e.path(), &dst, k, o).is_ok();
             let after = fs::metadata(&dst).map(|m| m.len()).unwrap_or(u64::MAX);
             if ok && after < before {

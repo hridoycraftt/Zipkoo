@@ -31,20 +31,57 @@ pub struct ArchiveInfo {
     pub entries: Vec<Entry>,
 }
 
-/// Resolve split parts to a single readable file.
-pub(crate) fn resolve(path: &Path) -> Result<(PathBuf, Format, u64)> {
-    let (real, size) = if split::is_first_part(path) {
+pub(crate) trait ReadSeek: Read + std::io::Seek + Send {}
+impl<T: Read + std::io::Seek + Send> ReadSeek for T {}
+
+/// A ZIP reader that also opens Zipkoo's own self-extracting files (the ZIP sits after the stub).
+pub(crate) fn open_zip(path: &Path) -> Result<zip::ZipArchive<Box<dyn ReadSeek>>> {
+    let mut f = File::open(path)?;
+    let r: Box<dyn ReadSeek> = match crate::sfx::locate_payload(&mut f)? {
+        Some((off, len)) => Box::new(BufReader::new(crate::sfx::Window::new(f, off, len)?)),
+        None => Box::new(BufReader::new(f)),
+    };
+    Ok(zip::ZipArchive::new(r)?)
+}
+
+/// Resolve split parts to a single readable file. Keep the returned guard alive while reading:
+/// it deletes the joined temporary copy when dropped.
+pub(crate) fn resolve(path: &Path) -> Result<(PathBuf, Format, u64, Option<split::TempDir>)> {
+    let (real, size, guard) = if split::is_first_part(path) {
         let total: u64 = split::parts_of(path)?
             .iter()
             .map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
             .sum();
-        (split::join_to_temp(path)?, total)
+        let (p, g) = split::join_to_temp(path)?;
+        (p, total, Some(g))
     } else {
-        (path.to_path_buf(), std::fs::metadata(path)?.len())
+        (path.to_path_buf(), std::fs::metadata(path)?.len(), None)
     };
     let fmt = Format::detect(&real)
         .ok_or_else(|| Error::UnsupportedFormat(path.display().to_string()))?;
-    Ok((real, fmt, size))
+    Ok((real, fmt, size, guard))
+}
+
+/// Check a ZIP password up front so a typo is caught when the archive is opened,
+/// not halfway through extracting or (worse) when Smart Update re-encrypts with it.
+fn check_zip_password(path: &Path, password: &str) -> Result<()> {
+    let mut z = open_zip(path)?;
+    for i in 0..z.len() {
+        let enc = z.by_index_raw(i)?.encrypted();
+        if enc {
+            let mut f = z.by_index_decrypt(i, password.as_bytes())?;
+            let mut buf = [0u8; 1];
+            // AES verifies a 2-byte check value on open; ZipCrypto checks one byte. Reading the
+            // whole (small) entry catches the rare false positive through the CRC/HMAC.
+            if f.size() <= 1 << 20 {
+                std::io::copy(&mut f, &mut std::io::sink()).map_err(|_| Error::WrongPassword)?;
+            } else {
+                let _ = f.read(&mut buf).map_err(|_| Error::WrongPassword)?;
+            }
+            return Ok(());
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn tar_reader(path: &Path, fmt: Format) -> Result<Box<dyn Read>> {
@@ -60,11 +97,14 @@ pub(crate) fn tar_reader(path: &Path, fmt: Format) -> Result<Box<dyn Read>> {
 }
 
 pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
-    let (real, format, archive_size) = resolve(path)?;
+    let (real, format, archive_size, _guard) = resolve(path)?;
     let mut entries = Vec::new();
     match format {
         Format::Zip => {
-            let mut z = zip::ZipArchive::new(BufReader::new(File::open(&real)?))?;
+            if let Some(pw) = password {
+                check_zip_password(&real, pw)?;
+            }
+            let mut z = open_zip(&real)?;
             for i in 0..z.len() {
                 let f = z.by_index_raw(i)?;
                 entries.push(Entry {
@@ -129,8 +169,9 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
     for e in &mut entries {
         e.executable = e.executable || (!e.is_dir && is_executable_name(&e.name));
     }
-    let total_size = entries.iter().map(|e| e.size).sum();
-    let file_count = entries.iter().filter(|e| !e.is_dir).count();
+    let user = |e: &&Entry| !e.name.starts_with(crate::update::ZIPKOO_DIR);
+    let total_size = entries.iter().filter(user).map(|e| e.size).sum();
+    let file_count = entries.iter().filter(user).filter(|e| !e.is_dir).count();
     let encrypted = entries.iter().any(|e| e.encrypted);
     let executables = entries.iter().filter(|e| e.executable).map(|e| e.name.clone()).collect();
     Ok(ArchiveInfo { path: path.to_path_buf(), format, archive_size, total_size, file_count, encrypted, executables, entries })
@@ -138,11 +179,11 @@ pub fn inspect(path: &Path, password: Option<&str>) -> Result<ArchiveInfo> {
 
 /// Read one file from the archive into memory (for previews). Refuses files over `max_bytes`.
 pub fn peek(path: &Path, name: &str, password: Option<&str>, max_bytes: u64) -> Result<Vec<u8>> {
-    let (real, format, _) = resolve(path)?;
+    let (real, format, _, _guard) = resolve(path)?;
     let too_big = || Error::TooLarge { limit: max_bytes };
     match format {
         Format::Zip => {
-            let mut z = zip::ZipArchive::new(BufReader::new(File::open(&real)?))?;
+            let mut z = open_zip(&real)?;
             let idx = z.index_for_name(name).ok_or_else(|| Error::EntryNotFound(name.into()))?;
             let mut f = match password {
                 Some(pw) => z.by_index_decrypt(idx, pw.as_bytes())?,

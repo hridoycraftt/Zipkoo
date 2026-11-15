@@ -6,7 +6,7 @@ use crate::progress::{Progress, Reporter};
 use crate::safety::{guarded_copy, is_executable_name, safe_join, Budget};
 use serde::Serialize;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -56,6 +56,10 @@ struct Ctx<'o, 'r, 'a> {
 
 impl Ctx<'_, '_, '_> {
     fn wanted(&self, name: &str) -> bool {
+        // Smart Update's history stays inside the archive unless asked for by name.
+        if name.starts_with(crate::update::ZIPKOO_DIR) {
+            return self.opts.only.iter().any(|o| name.starts_with(o.as_str()));
+        }
         self.opts.only.is_empty() || self.opts.only.iter().any(|o| o == name || name.starts_with(&format!("{}/", o.trim_end_matches('/'))))
     }
 
@@ -116,7 +120,7 @@ pub fn extract(
     on_progress: &mut dyn FnMut(&Progress),
     cancel: Option<&AtomicBool>,
 ) -> Result<ExtractReport> {
-    let (real, format, archive_size) = resolve(path)?;
+    let (real, format, archive_size, _guard) = resolve(path)?;
     let declared = match crate::inspect::inspect(path, opts.password) {
         Ok(i) if opts.only.is_empty() => i.total_size,
         Ok(i) => i.entries.iter().filter(|e| opts.only.iter().any(|o| e.name == *o || e.name.starts_with(&format!("{}/", o.trim_end_matches('/'))))).map(|e| e.size).sum(),
@@ -141,7 +145,7 @@ pub fn extract(
 
     match format {
         Format::Zip => {
-            let mut z = zip::ZipArchive::new(BufReader::new(File::open(&real)?))?;
+            let mut z = crate::inspect::open_zip(&real)?;
             for i in 0..z.len() {
                 let (name, is_dir, is_link, encrypted) = {
                     let f = z.by_index_raw(i)?;
@@ -271,6 +275,7 @@ pub fn suggest_dest(archive: &Path, info: &crate::inspect::ArchiveInfo) -> (Path
     let tops: std::collections::BTreeSet<&str> = info
         .entries
         .iter()
+        .filter(|e| !e.name.starts_with(crate::update::ZIPKOO_DIR))
         .map(|e| e.name.trim_start_matches("./").split('/').next().unwrap_or(""))
         .filter(|s| !s.is_empty())
         .collect();

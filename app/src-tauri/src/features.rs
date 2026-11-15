@@ -41,7 +41,7 @@ async fn job<T: Send + 'static>(
     f: impl FnOnce(&mut dyn FnMut(&Progress), &AtomicBool) -> zipkoo_core::Result<T> + Send + 'static,
 ) -> Result<T, UiError> {
     let cancel = Arc::new(AtomicBool::new(false));
-    jobs.0.lock().unwrap().insert(id.clone(), cancel.clone());
+    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), cancel.clone());
     let id2 = id.clone();
     let res = tauri::async_runtime::spawn_blocking(move || {
         let mut emit = |p: &Progress| {
@@ -49,11 +49,9 @@ async fn job<T: Send + 'static>(
         };
         f(&mut emit, &cancel)
     })
-    .await
-    .map_err(ui)?;
-    let app_jobs = jobs;
-    app_jobs.0.lock().unwrap().remove(&id);
-    res.map_err(Into::into)
+    .await;
+    jobs.0.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    res.map_err(ui)?.map_err(Into::into)
 }
 
 // ---------- 12. Batch Convert ----------
@@ -75,7 +73,17 @@ pub async fn convert_archives(app: AppHandle, jobs: State<'_, Jobs>, job_id: Str
                 break;
             }
             let dst = zipkoo_core::convert::converted_path(&a, format);
-            let opts = zipkoo_core::convert::ConvertOptions { password: password.as_deref(), pack: PackOptions { format, ..Default::default() } };
+            // A locked archive stays locked in its new format; TAR.ZST can't hold a password.
+            let locked = match &password {
+                Some(_) => zipkoo_core::inspect(&a, password.as_deref()).map(|i| i.encrypted).unwrap_or(true),
+                None => false,
+            };
+            if locked && !format.supports_password() {
+                out.push(ConvertResult { source: a, output: None, error: Some("This archive is locked, and TAR.ZST can't keep a password. Convert it to ZIP or 7z instead.".into()), output_bytes: 0 });
+                continue;
+            }
+            let pack = PackOptions { format, password: if locked { password.clone() } else { None }, ..Default::default() };
+            let opts = zipkoo_core::convert::ConvertOptions { password: password.as_deref(), pack };
             match zipkoo_core::convert::convert(&a, &dst, &opts, emit, Some(cancel)) {
                 Ok(r) => out.push(ConvertResult { source: a, output: Some(dst), error: None, output_bytes: r.output_bytes }),
                 Err(zipkoo_core::Error::Cancelled) => return Err(zipkoo_core::Error::Cancelled),
@@ -192,12 +200,16 @@ pub struct IndexStats {
 pub async fn index_refresh(app: AppHandle, extra: Vec<PathBuf>) -> Result<IndexStats, UiError> {
     let db = data_dir(&app).join("search.db");
     tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<SearchIndex>();
-        let mut guard = state.0.lock().unwrap();
-        if guard.is_none() {
-            *guard = Some(zipkoo_core::index::Index::open(&db)?);
+        // Refresh on its own connection so searching stays responsive while this runs
+        // (SQLite in WAL mode allows a reader alongside the writer).
+        let mut ix = zipkoo_core::index::Index::open(&db)?;
+        {
+            let state = app.state::<SearchIndex>();
+            let mut g = state.0.lock().unwrap_or_else(|e| e.into_inner());
+            if g.is_none() {
+                *g = zipkoo_core::index::Index::open(&db).ok();
+            }
         }
-        let ix = guard.as_mut().unwrap();
         let mut archives = Vec::new();
         for root in library_roots(&extra) {
             if root.is_file() {
@@ -217,12 +229,17 @@ pub async fn index_refresh(app: AppHandle, extra: Vec<PathBuf>) -> Result<IndexS
 }
 
 #[tauri::command]
-pub fn search_archives(state: State<'_, SearchIndex>, query: String) -> Result<Vec<zipkoo_core::index::Hit>, UiError> {
-    let g = state.0.lock().unwrap();
-    match g.as_ref() {
-        Some(ix) => ix.search(&query, 300).map_err(Into::into),
-        None => Ok(Vec::new()),
-    }
+pub async fn search_archives(app: AppHandle, query: String) -> Result<Vec<zipkoo_core::index::Hit>, UiError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<SearchIndex>();
+        let g = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        match g.as_ref() {
+            Some(ix) => ix.search(&query, 300).map_err(Into::into),
+            None => Ok(Vec::new()),
+        }
+    })
+    .await
+    .map_err(ui)?
 }
 
 // ---------- 6. Secure Share ----------
@@ -270,7 +287,7 @@ pub async fn share_file(app: AppHandle, jobs: State<'_, Jobs>, job_id: String, p
             return Err(zipkoo_core::Error::Cancelled);
         }
         let opts = zipkoo_core::share::ShareOptions { server: &server, expires_hours: hours, max_downloads: downloads, password: password.as_deref().filter(|p| !p.is_empty()) };
-        let s = zipkoo_core::share::upload(&path, &opts, &mut cb)?;
+        let s = zipkoo_core::share::upload_cancellable(&path, &opts, &mut cb, Some(cancel))?;
         Ok(ShareRecord { url: s.url, id: s.id, delete_token: s.delete_token, expires_at: s.expires_at, max_downloads: s.max_downloads, password: s.password, name, size, created: now(), server: server.clone() })
     })
     .await?;
@@ -308,13 +325,18 @@ pub async fn share_delete(app: AppHandle, id: String) -> Result<(), UiError> {
 
 #[tauri::command]
 pub async fn share_download(app: AppHandle, jobs: State<'_, Jobs>, job_id: String, link: String, dest: PathBuf, password: Option<String>) -> Result<PathBuf, UiError> {
-    job(app, &jobs, job_id, move |emit, _cancel| {
+    job(app, &jobs, job_id, move |emit, cancel| {
+        let meta = zipkoo_core::share::check(&link, password.as_deref())?;
         let mut done = 0u64;
+        let mut last = std::time::Instant::now();
         let mut cb = |n: u64| {
             done += n;
-            emit(&Progress { done_bytes: done, total_bytes: 0, current: String::new() });
+            if last.elapsed().as_millis() > 80 {
+                last = std::time::Instant::now();
+                emit(&Progress { done_bytes: done, total_bytes: meta.size, current: meta.name.clone() });
+            }
         };
-        zipkoo_core::share::download(&link, &dest, password.as_deref(), &mut cb)
+        zipkoo_core::share::download_cancellable(&link, &dest, password.as_deref(), &mut cb, Some(cancel))
     })
     .await
 }
@@ -383,21 +405,38 @@ pub fn watch_remove(app: AppHandle, id: String) -> Result<Vec<Watch>, UiError> {
     Ok(all)
 }
 
-/// Snapshot one watch now (also used by the scheduler).
+/// Snapshot one watch now (also used by the scheduler). A panic inside is caught so the
+/// scheduler keeps running and the watch isn't stuck as "running" forever.
 pub fn run_watch(app: &AppHandle, id: &str, force: bool) {
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_watch_inner(app, id, force)));
+    if r.is_err() {
+        app.state::<Watches>().running.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        let file = watches_file(app);
+        let mut all: Vec<Watch> = load(&file);
+        if let Some(x) = all.iter_mut().find(|x| x.id == id) {
+            x.last_run = Some(now());
+            x.last_result = Some("The backup stopped because of an internal error.".into());
+            x.last_ok = false;
+        }
+        let _ = save(&file, &all);
+        let _ = app.emit("watches-updated", ());
+    }
+}
+
+fn run_watch_inner(app: &AppHandle, id: &str, force: bool) {
     let state = app.state::<Watches>();
-    if !state.running.lock().unwrap().insert(id.to_string()) {
+    if !state.running.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string()) {
         return;
     }
     let file = watches_file(app);
     let all: Vec<Watch> = load(&file);
     let Some(w) = all.into_iter().find(|w| w.id == id) else {
-        state.running.lock().unwrap().remove(id);
+        state.running.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
         return;
     };
     let due = force || w.last_run.map(|t| now() >= t + w.interval_minutes as u64 * 60).unwrap_or(true);
     if !due || (w.paused && !force) {
-        state.running.lock().unwrap().remove(id);
+        state.running.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
         return;
     }
     let opts = zipkoo_core::backup::BackupOptions { keep: w.keep, recovery_percent: w.repair.then_some(10), ..Default::default() };
@@ -414,7 +453,7 @@ pub fn run_watch(app: &AppHandle, id: &str, force: bool) {
         x.last_ok = ok;
     }
     let _ = save(&file, &all);
-    state.running.lock().unwrap().remove(id);
+    state.running.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     let _ = app.emit("watches-updated", ());
 }
 

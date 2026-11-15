@@ -164,8 +164,17 @@ fn read_layout(rec: &mut File) -> Result<Layout> {
     Ok(Layout { file_size, block, k, m, groups })
 }
 
+/// Redundancy (percent) of an existing repair file, so it can be rebuilt with the same setting.
+pub fn percent_of(rec: &Path) -> Result<u8> {
+    let l = read_layout(&mut File::open(rec)?)?;
+    Ok(((l.m * 100) / l.k).clamp(1, 50) as u8)
+}
+
 #[derive(Debug, Default, Serialize, PartialEq)]
 pub struct Health {
+    /// The archive is larger than when the repair data was made: it was changed on purpose
+    /// (e.g. updated), so the repair data no longer applies and nothing is repaired.
+    pub outdated: bool,
     pub blocks: u64,
     pub damaged: u64,
     /// Damaged blocks in groups that have more damage than parity can fix.
@@ -179,7 +188,7 @@ impl Health {
         self.damaged == 0 && self.size_ok
     }
     pub fn repairable(&self) -> bool {
-        self.unrecoverable == 0
+        self.unrecoverable == 0 && !self.outdated
     }
 }
 
@@ -192,6 +201,11 @@ pub fn check(archive: &Path, fix: bool, on_progress: &mut dyn FnMut(&Progress), 
     let actual = std::fs::metadata(archive).map(|m| m.len()).unwrap_or(0);
     let mut f = if fix { OpenOptions::new().read(true).write(true).open(archive)? } else { File::open(archive)? };
     let mut health = Health { blocks: l.file_size.div_ceil(l.block), size_ok: actual == l.file_size, ..Default::default() };
+    if actual > l.file_size {
+        // Growth is not damage. Repairing would cut the new data off.
+        health.outdated = true;
+        return Ok(health);
+    }
     let mut rep = Reporter::new(on_progress, cancel, l.file_size);
     let mut buf = vec![0u8; l.block as usize];
     let mut hash = [0u8; 32];

@@ -3,8 +3,30 @@ use crate::error::{Error, Result};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+const RESERVED: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Make one path component safe to create on Windows: no reserved device names (CON, NUL,
+/// COM1, also with an extension like "nul.txt"), no trailing dots or spaces, no `<>:"|?*`.
+pub fn windows_safe(component: &str) -> String {
+    let mut s: String = component.chars().map(|c| if "<>:\"|?*".contains(c) || (c as u32) < 32 { '_' } else { c }).collect();
+    while s.ends_with('.') || s.ends_with(' ') {
+        s.pop();
+    }
+    if s.is_empty() {
+        s.push('_');
+    }
+    let stem = s.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if RESERVED.contains(&stem.trim_end()) {
+        s.insert(0, '_');
+    }
+    s
+}
+
 /// Join an untrusted entry name onto `dest`. Rejects `..`, absolute paths and drive prefixes,
-/// treating both `/` and `\` as separators.
+/// treating both `/` and `\` as separators. On Windows, names are made creatable.
 pub fn safe_join(dest: &Path, entry_name: &str) -> Result<PathBuf> {
     let normalized = entry_name.replace('\\', "/");
     let mut out = dest.to_path_buf();
@@ -13,10 +35,15 @@ pub fn safe_join(dest: &Path, entry_name: &str) -> Result<PathBuf> {
         match c {
             Component::Normal(p) => {
                 let s = p.to_string_lossy();
-                if s.contains(':') && cfg!(windows) {
-                    return Err(Error::UnsafePath(entry_name.into()));
+                if cfg!(windows) {
+                    // A drive letter ("C:") smuggled in as a component is never safe.
+                    if s.len() == 2 && s.ends_with(':') {
+                        return Err(Error::UnsafePath(entry_name.into()));
+                    }
+                    out.push(windows_safe(&s));
+                } else {
+                    out.push(p);
                 }
-                out.push(p);
                 pushed = true;
             }
             Component::CurDir => {}
@@ -111,6 +138,17 @@ mod tests {
         assert!(safe_join(d, "..\\..\\win.ini").is_err());
         assert_eq!(safe_join(d, "a/b.txt").unwrap(), Path::new("/tmp/out/a/b.txt"));
         assert_eq!(safe_join(d, "./a\\b.txt").unwrap(), Path::new("/tmp/out/a/b.txt"));
+    }
+
+    #[test]
+    fn windows_names() {
+        assert_eq!(windows_safe("CON"), "_CON");
+        assert_eq!(windows_safe("nul.txt"), "_nul.txt");
+        assert_eq!(windows_safe("com1"), "_com1");
+        assert_eq!(windows_safe("notes. "), "notes");
+        assert_eq!(windows_safe("a:b?.txt"), "a_b_.txt");
+        assert_eq!(windows_safe("console.log"), "console.log");
+        assert_eq!(windows_safe("..."), "_");
     }
 
     #[test]

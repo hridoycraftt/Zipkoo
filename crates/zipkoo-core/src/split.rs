@@ -67,19 +67,37 @@ pub fn parts_of(first: &Path) -> Result<Vec<PathBuf>> {
     Ok(parts)
 }
 
-/// Join parts into one temporary file and return its path. The file keeps the inner
-/// archive name so format detection still works.
-pub fn join_to_temp(first: &Path) -> Result<PathBuf> {
+/// A temporary folder that is deleted when dropped.
+pub struct TempDir(pub PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn unique_temp_dir() -> std::io::Result<TempDir> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("zipkoo-join-{}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed), nanos));
+    fs::create_dir_all(&dir)?;
+    Ok(TempDir(dir))
+}
+
+/// Join parts into one temporary file. The file keeps the inner archive name so format
+/// detection still works; the returned guard deletes it when the caller is done.
+pub fn join_to_temp(first: &Path) -> Result<(PathBuf, TempDir)> {
     let parts = parts_of(first)?;
     let inner = first.with_extension("");
     let name = inner.file_name().unwrap_or_default();
-    let dir = std::env::temp_dir().join(format!("zipkoo-join-{}", std::process::id()));
-    fs::create_dir_all(&dir)?;
+    let guard = unique_temp_dir()?;
+    let dir = guard.0.clone();
     let out_path = dir.join(name);
     let mut out = BufWriter::new(File::create(&out_path)?);
     for p in parts {
         io::copy(&mut BufReader::new(File::open(p)?), &mut out)?;
     }
     out.flush()?;
-    Ok(out_path)
+    Ok((out_path, guard))
 }

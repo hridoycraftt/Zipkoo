@@ -124,7 +124,7 @@ export const isArchive = (p: string) => ARCHIVE_RE.test(p);
 // ---------- Features 6–12 ----------
 export interface UpdateReport { version: number; added: number; changed: number; removed: number; unchanged: number; bytes_packed: number }
 export interface Version { version: number; time: number; added: string[]; changed: string[]; removed: string[] }
-export interface Health { blocks: number; damaged: number; unrecoverable: number; size_ok: boolean; repaired: number }
+export interface Health { outdated: boolean; blocks: number; damaged: number; unrecoverable: number; size_ok: boolean; repaired: number }
 export interface DupGroup { size: number; files: string[]; wasted: number }
 export interface CloudFolder { provider: string; label: string; path: string }
 export interface FolderItem { path: string; size: number; modified: number }

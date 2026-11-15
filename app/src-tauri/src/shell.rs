@@ -286,7 +286,7 @@ pub const MERGE_WINDOW: std::time::Duration = std::time::Duration::from_millis(4
 
 impl Inbox {
     pub fn push(&self, a: ShellAction) {
-        let mut q = self.queue.lock().unwrap();
+        let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         let now = std::time::Instant::now();
         if let Some((last, at)) = q.last_mut() {
             if last.action == a.action && a.action != "open" && now.duration_since(*at) < MERGE_WINDOW {
@@ -304,7 +304,7 @@ impl Inbox {
 
     /// Actions whose merge window has closed.
     pub fn take_ready(&self) -> Vec<ShellAction> {
-        let mut q = self.queue.lock().unwrap();
+        let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         let now = std::time::Instant::now();
         let (ready, wait): (Vec<_>, Vec<_>) = q.drain(..).partition(|(_, at)| now.duration_since(*at) >= MERGE_WINDOW);
         *q = wait;

@@ -91,7 +91,11 @@ impl Format {
             None
         };
         let by_name = path.file_name().and_then(|n| n.to_str()).and_then(Format::from_name);
+        // Zipkoo's own self-extracting programs carry a ZIP after the stub.
+        let sfx = || {
+            File::open(path).ok().and_then(|mut f| crate::sfx::locate_payload(&mut f).ok().flatten()).map(|_| Format::Zip)
+        };
         // Compressed tars: magic only says gzip/zstd/etc, so trust the name for those.
-        by_magic.or(by_name)
+        by_magic.or_else(sfx).or(by_name)
     }
 }

@@ -56,8 +56,29 @@ pub fn fingerprint(dir: &Path) -> String {
     h.finalize().to_hex().to_string()
 }
 
-fn state_file(dest: &Path, name: &str) -> PathBuf {
-    dest.join(format!(".zipkoo-watch-{name}.json"))
+/// One state file per watched folder (keyed by its full path), so two folders with the same
+/// name backing up into one place don't confuse each other.
+fn state_file(dest: &Path, src: &Path) -> PathBuf {
+    let key = blake3::hash(src.to_string_lossy().as_bytes()).to_hex();
+    dest.join(format!(".zipkoo-watch-{}.json", &key[..16]))
+}
+
+/// "Name 2026-11-15 14-02-11.zip" or "Name 2026-11-15 14-02-11 (2).zip", exactly.
+fn is_snapshot_of(file: &str, name: &str, ext: &str) -> bool {
+    let Some(rest) = file.strip_prefix(name).and_then(|r| r.strip_prefix(' ')).and_then(|r| r.strip_suffix(&format!(".{ext}"))) else {
+        return false;
+    };
+    let (stamp, tail) = rest.split_at(rest.len().min(19));
+    let stamp_ok = stamp.len() == 19
+        && stamp.chars().enumerate().all(|(i, c)| match i {
+            4 | 7 => c == '-',
+            10 => c == ' ',
+            13 | 16 => c == '-',
+            _ => c.is_ascii_digit(),
+        });
+    let tail_ok = tail.is_empty()
+        || (tail.starts_with(" (") && tail.ends_with(')') && tail[2..tail.len() - 1].chars().all(|c| c.is_ascii_digit()) && tail.len() > 3);
+    stamp_ok && tail_ok
 }
 
 fn stamp() -> String {
@@ -67,14 +88,12 @@ fn stamp() -> String {
 
 /// Existing snapshots of `name` in `dest`, oldest first.
 pub fn snapshots(dest: &Path, name: &str, format: Format) -> Vec<PathBuf> {
-    let prefix = format!("{name} ");
-    let suffix = format!(".{}", format.extension());
     let mut v: Vec<PathBuf> = fs::read_dir(dest)
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with(&prefix) && n.ends_with(&suffix)).unwrap_or(false))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).map(|n| is_snapshot_of(n, name, format.extension())).unwrap_or(false))
         .collect();
     v.sort();
     v
@@ -94,7 +113,7 @@ pub fn snapshot(
     fs::create_dir_all(dest)?;
     let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Folder".into());
     let fp = fingerprint(src);
-    let state = state_file(dest, &name);
+    let state = state_file(dest, src);
     if fs::read_to_string(&state).ok().as_deref() == Some(fp.as_str()) && !snapshots(dest, &name, opts.format).is_empty() {
         return Ok(None);
     }
@@ -118,4 +137,18 @@ pub fn snapshot(
         }
     }
     Ok(Some(Snapshot { path: out, report, pruned }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_snapshot_of;
+
+    #[test]
+    fn snapshot_names_match_exactly() {
+        assert!(is_snapshot_of("Photos 2026-11-15 14-02-11.zip", "Photos", "zip"));
+        assert!(is_snapshot_of("Photos 2026-11-15 14-02-11 (2).zip", "Photos", "zip"));
+        assert!(!is_snapshot_of("Photos 2023 2026-11-15 14-02-11.zip", "Photos", "zip"));
+        assert!(!is_snapshot_of("Photos holiday.zip", "Photos", "zip"));
+        assert!(!is_snapshot_of("Photos 2026-11-15 14-02-11.7z", "Photos", "zip"));
+    }
 }

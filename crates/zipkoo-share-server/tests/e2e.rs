@@ -54,8 +54,10 @@ fn password_limit_and_delete() {
     let dest = t.path().join("got");
     assert!(matches!(share::download(&s.url, &dest, None, &mut |_| {}), Err(zipkoo_core::Error::PasswordRequired)));
     assert!(matches!(share::download(&s.url, &dest, Some("wrong"), &mut |_| {}), Err(zipkoo_core::Error::WrongPassword)));
-    // Both failed attempts counted as downloads, so the limit (2) is reached.
-    assert!(share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).is_err(), "limit reached");
+    // Failed password attempts are checked against the header only and don't use up downloads.
+    share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).unwrap();
+    share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).unwrap();
+    assert!(share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).is_err(), "limit of 2 reached");
 
     let s = share::upload(&src, &share::ShareOptions { max_downloads: Some(1), ..opts.clone() }, &mut |_| {}).unwrap();
     let got = share::download(&s.url, &dest, Some("correct horse"), &mut |_| {}).unwrap();

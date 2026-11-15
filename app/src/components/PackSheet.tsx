@@ -179,7 +179,7 @@ export function PackSheet({ t, lang, inputs, sfxEnabled, clouds = [], preset, on
           <div className="cloud-chips">
             <span className="saveas-label">{t("cloudSave")}</span>
             {clouds.map((c) => (
-              <button type="button" key={c.path} className="chip-btn" onClick={() => setCustomOut(`${c.path}${c.path.includes("\\") ? "\\" : "/"}${(output.split(/[\\/]/).pop() ?? "Archive").replace(/\.[^.]+$/, "")}`)}>
+              <button type="button" key={c.path} className="chip-btn" onClick={() => setCustomOut(`${c.path}${c.path.includes("\\") ? "\\" : "/"}${(output.split(/[\\/]/).pop() ?? "Archive").replace(/\.(zip|7z|tar\.zst|exe)$/i, "")}`)}>
                 {c.label}
               </button>
             ))}

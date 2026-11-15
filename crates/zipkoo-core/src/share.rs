@@ -237,28 +237,77 @@ fn http_err(e: ureq::Error) -> Error {
 struct Counting<'a, R> {
     inner: R,
     cb: &'a mut dyn FnMut(u64),
+    cancel: Option<&'a std::sync::atomic::AtomicBool>,
 }
 
 impl<R: Read> Read for Counting<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.cancel.map(|c| c.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false) {
+            return Err(io::Error::other("zipkoo: cancelled"));
+        }
         let n = self.inner.read(buf)?;
         (self.cb)(n as u64);
         Ok(n)
     }
 }
 
+fn cancelled(e: Error) -> Error {
+    match e {
+        Error::Io(io) if io.to_string().contains("zipkoo: cancelled") => Error::Cancelled,
+        Error::Damaged(m) if m.contains("zipkoo: cancelled") => Error::Cancelled,
+        other => other,
+    }
+}
+
+/// Check the password against the share's header without downloading the file.
+/// The server's `/head` route does not count as a download.
+pub fn check(link: &str, password: Option<&str>) -> Result<Meta> {
+    let (server, id, key) = parse_link(link)?;
+    let resp = ureq::get(&format!("{server}/api/shares/{id}/head")).call().map_err(http_err)?;
+    let mut head = Vec::new();
+    resp.into_reader().take(HEADER_LEN as u64 + 65_536 + 16).read_to_end(&mut head)?;
+    if head.len() < HEADER_LEN || &head[..8] != MAGIC {
+        return Err(crypto_err("not a Zipkoo share"));
+    }
+    let header: [u8; HEADER_LEN] = head[..HEADER_LEN].try_into().unwrap();
+    let has_pw = needs_password(&header);
+    if has_pw && password.is_none() {
+        return Err(Error::PasswordRequired);
+    }
+    let prefix: [u8; 8] = header[13..21].try_into().unwrap();
+    let salt: [u8; 16] = header[21..37].try_into().unwrap();
+    let iters = u32::from_le_bytes(header[37..41].try_into().unwrap());
+    let meta_len = u32::from_le_bytes(header[41..45].try_into().unwrap()) as usize;
+    let meta_ct = head.get(HEADER_LEN..HEADER_LEN + meta_len).ok_or_else(|| crypto_err("the shared file is incomplete"))?;
+    let k = derive(&key, if has_pw { password } else { None }, &salt, iters);
+    let cipher = Aes256Gcm::new_from_slice(&k).unwrap();
+    let meta = cipher
+        .decrypt(Nonce::from_slice(&nonce(&prefix, u32::MAX)), Payload { msg: meta_ct, aad: &header })
+        .map_err(|_| if has_pw { Error::WrongPassword } else { crypto_err("this link's key doesn't match the file") })?;
+    serde_json::from_slice(&meta).map_err(|_| crypto_err("bad metadata"))
+}
+
 /// Encrypt `file` and upload it. `on_bytes` gets encrypted then uploaded byte counts.
 pub fn upload(file: &Path, opts: &ShareOptions, on_bytes: &mut dyn FnMut(u64)) -> Result<Shared> {
+    upload_cancellable(file, opts, on_bytes, None)
+}
+
+pub fn upload_cancellable(file: &Path, opts: &ShareOptions, on_bytes: &mut dyn FnMut(u64), cancel: Option<&std::sync::atomic::AtomicBool>) -> Result<Shared> {
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
     let mut tag = [0u8; 8];
     OsRng.fill_bytes(&mut tag);
     let tag: String = tag.iter().map(|b| format!("{b:02x}")).collect();
     let tmp = std::env::temp_dir().join(format!("zipkoo-share-{tag}.bin"));
-    let key = encrypt(file, &tmp, &name, opts.password, on_bytes);
+    let mut enc_cb = |n: u64| on_bytes(n);
+    let key = if cancel.map(|c| c.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false) {
+        Err(Error::Cancelled)
+    } else {
+        encrypt(file, &tmp, &name, opts.password, &mut enc_cb)
+    };
     let res = (|| -> Result<Shared> {
         let key = key?;
         let len = std::fs::metadata(&tmp)?.len();
-        let body = Counting { inner: BufReader::new(File::open(&tmp)?), cb: on_bytes };
+        let body = Counting { inner: BufReader::new(File::open(&tmp)?), cb: on_bytes, cancel };
         let mut req = ureq::post(&format!("{}/api/shares", opts.server.trim_end_matches('/')))
             .set("Content-Type", "application/octet-stream")
             .set("Content-Length", &len.to_string())
@@ -278,15 +327,22 @@ pub fn upload(file: &Path, opts: &ShareOptions, on_bytes: &mut dyn FnMut(u64)) -
         })
     })();
     let _ = std::fs::remove_file(&tmp);
-    res
+    res.map_err(cancelled)
 }
 
-/// Download and decrypt a share link into `dest_dir`.
+/// Download and decrypt a share link into `dest_dir`. The password is checked first,
+/// so a missing or wrong password never uses up one of the link's downloads.
 pub fn download(link: &str, dest_dir: &Path, password: Option<&str>, on_bytes: &mut dyn FnMut(u64)) -> Result<PathBuf> {
+    download_cancellable(link, dest_dir, password, on_bytes, None)
+}
+
+pub fn download_cancellable(link: &str, dest_dir: &Path, password: Option<&str>, on_bytes: &mut dyn FnMut(u64), cancel: Option<&std::sync::atomic::AtomicBool>) -> Result<PathBuf> {
+    check(link, password)?;
     let (server, id, key) = parse_link(link)?;
     let resp = ureq::get(&format!("{server}/api/shares/{id}/blob")).call().map_err(http_err)?;
-    let mut reader = BufReader::new(resp.into_reader());
-    decrypt(&mut reader, dest_dir, &key, password, on_bytes)
+    let mut noop = |_n: u64| {};
+    let mut reader = BufReader::new(Counting { inner: resp.into_reader(), cb: &mut noop, cancel });
+    decrypt(&mut reader, dest_dir, &key, password, on_bytes).map_err(cancelled)
 }
 
 pub fn delete(server: &str, id: &str, token: &str) -> Result<()> {

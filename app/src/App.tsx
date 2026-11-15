@@ -39,7 +39,7 @@ const store = {
 };
 
 type Job = { id: string; kind: "pack" | "extract"; title?: string; progress: Progress | null };
-type PwPrompt = { path: string; error?: string; then: (pw: string) => void };
+type PwPrompt = { path: string; error?: string; then: (pw: string) => void; cancel?: () => void };
 
 export default function App() {
   const [lang, setLang] = useState<Lang>(() => store.get<Lang>("lang", navigator.language.startsWith("bn") ? "bn" : "en"));
@@ -104,28 +104,42 @@ export default function App() {
     [t, errorText],
   );
 
+  // One long job at a time: a right-click action that arrives during a job waits for it,
+  // instead of taking over the progress window (which made the first job uncancellable).
+  const serial = useRef<Promise<unknown>>(Promise.resolve());
+  const exclusive = useCallback(<R,>(fn: () => Promise<R>): Promise<R> => {
+    const p = serial.current.then(fn, fn);
+    serial.current = p.catch(() => undefined);
+    return p;
+  }, []);
+  const clearToast = useCallback(() => setToast(null), []);
+
   /** Run any long task behind the progress overlay; errors become toasts. */
   const runJob = useCallback(
-    async <R,>(title: string, fn: (jobId: string) => Promise<R>): Promise<R | undefined> => {
-      const id = uid();
-      setJob({ id, kind: "pack", title, progress: null });
-      try {
-        return await fn(id);
-      } catch (err) {
-        failToast(err);
-        return undefined;
-      } finally {
-        setJob((j) => (j?.id === id ? null : j));
-      }
-    },
-    [failToast],
+    <R,>(title: string, fn: (jobId: string) => Promise<R>): Promise<R | undefined> =>
+      exclusive(async () => {
+        const id = uid();
+        setJob({ id, kind: "pack", title, progress: null });
+        try {
+          return await fn(id);
+        } catch (err) {
+          failToast(err);
+          return undefined;
+        } finally {
+          setJob((j) => (j?.id === id ? null : j));
+        }
+      }),
+    [failToast, exclusive],
   );
 
   /** Ask for a password, then retry with it. */
   const askPassword = useCallback(
-    (path: string, retry: (pw: string) => void, wrong = false) => setPwPrompt({ path, error: wrong ? t("wrongPw") : undefined, then: retry }),
+    (path: string, retry: (pw: string) => void, wrong = false, cancel?: () => void) =>
+      setPwPrompt({ path, error: wrong ? t("wrongPw") : undefined, then: retry, cancel }),
     [t],
   );
+
+
 
   const openPath = useCallback(
     async (path: string, password?: string) => {
@@ -152,6 +166,7 @@ export default function App() {
   const startPack = useCallback(
     async (req: PackRequest) => {
       setPack(null);
+      await exclusive(async () => {
       const id = uid();
       setJob({ id, kind: "pack", progress: null });
       try {
@@ -169,10 +184,11 @@ export default function App() {
       } catch (err) {
         failToast(err);
       } finally {
-        setJob(null);
+        setJob((j) => (j?.id === id ? null : j));
       }
+      });
     },
-    [remember, t, lang, failToast],
+    [remember, t, lang, failToast, exclusive],
   );
 
   /** Extract one archive. `dest` defaults to the smart "Extract here" folder. Returns false if it stopped. */
@@ -194,12 +210,13 @@ export default function App() {
             askPassword(path, (pw) => {
               setPwPrompt(null);
               runExtract(path, { ...opts, password: pw }).then(resolve);
-            }, e.code === "wrong_password" && !!opts.password),
+            }, e.code === "wrong_password" && !!opts.password, () => resolve(false)),
           );
         }
         failToast(e);
         return false;
       }
+      return exclusive(async (): Promise<boolean> => {
       const id = uid();
       setJob({ id, kind: "extract", title: opts.title, progress: null });
       try {
@@ -223,20 +240,21 @@ export default function App() {
         const e = asUiError(err);
         setJob(null);
         if (e.code === "password_required" || e.code === "wrong_password") {
-          return new Promise((resolve) =>
-            askPassword(path, (pw) => {
-              setPwPrompt(null);
-              runExtract(path, { ...opts, password: pw }).then(resolve);
-            }, e.code === "wrong_password" && !!opts.password),
-          );
+          // Ask outside the job lock so the next job isn't held up by the dialog.
+          setTimeout(() => askPassword(path, (pw) => {
+            setPwPrompt(null);
+            runExtract(path, { ...opts, password: pw });
+          }, e.code === "wrong_password" && !!opts.password), 0);
+        } else {
+          failToast(e);
         }
-        failToast(e);
         return false;
       } finally {
         setJob((j) => (j?.id === id ? null : j));
       }
+      });
     },
-    [askPassword, failToast, remember, t, lang],
+    [askPassword, failToast, remember, t, lang, exclusive],
   );
 
   // Right-click menu and "Open with Zipkoo".
@@ -449,6 +467,7 @@ export default function App() {
       <main className="content">
         {archive ? (
           <ArchiveView
+            key={archive.info.path}
             t={t}
             lang={lang}
             info={archive.info}
@@ -468,7 +487,7 @@ export default function App() {
         ) : view.kind === "watch" ? (
           <WatchView ctx={ctx} />
         ) : view.kind === "shares" ? (
-          <SharesView ctx={ctx} server={shareServer} setServer={setShareServer} askPassword={(name, retry) => setPwPrompt({ path: name, then: (pw) => { setPwPrompt(null); retry(pw); } })} />
+          <SharesView ctx={ctx} server={shareServer} setServer={setShareServer} askPassword={(name, retry, wrong) => setPwPrompt({ path: name, error: wrong ? t("wrongPw") : undefined, then: (pw) => { setPwPrompt(null); retry(pw); } })} />
         ) : view.kind === "tools" ? (
           <ToolsView ctx={ctx} />
         ) : view.kind === "cloud" ? (
@@ -501,12 +520,12 @@ export default function App() {
         </div>
       )}
       {pwPrompt && (
-        <PasswordDialog t={t} name={baseName(pwPrompt.path)} error={pwPrompt.error} onSubmit={(pw) => pwPrompt.then(pw)} onCancel={() => setPwPrompt(null)} />
+        <PasswordDialog t={t} name={baseName(pwPrompt.path)} error={pwPrompt.error} onSubmit={(pw) => pwPrompt.then(pw)} onCancel={() => { pwPrompt.cancel?.(); setPwPrompt(null); }} />
       )}
       {job && (
         <ProgressOverlay t={t} lang={lang} title={job.title ?? (job.kind === "pack" ? t("working") : t("extracting"))} progress={job.progress} onCancel={() => cancelJob(job.id)} />
       )}
-      {toast && <Toast toast={toast} onDone={() => setToast(null)} />}
+      {toast && <Toast toast={toast} onDone={clearToast} />}
     </div>
   );
 }

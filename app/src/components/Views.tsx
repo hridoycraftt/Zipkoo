@@ -212,7 +212,7 @@ export function WatchView({ ctx }: { ctx: ViewCtx }) {
 
 // ---------- Shared links ----------
 
-export function SharesView({ ctx, server, setServer, askPassword }: { ctx: ViewCtx; server: string; setServer: (s: string) => void; askPassword: (name: string, retry: (pw: string) => void) => void }) {
+export function SharesView({ ctx, server, setServer, askPassword }: { ctx: ViewCtx; server: string; setServer: (s: string) => void; askPassword: (name: string, retry: (pw: string) => void, wrong?: boolean) => void }) {
   const { t, lang } = ctx;
   const [list, setList] = useState<ShareRecord[]>([]);
   const [draft, setDraft] = useState(server);
@@ -226,21 +226,31 @@ export function SharesView({ ctx, server, setServer, askPassword }: { ctx: ViewC
     };
   }, [reload]);
 
-  const download = async (password?: string) => {
+  const download = async () => {
     const dest = await openDialog({ directory: true });
     if (!dest || Array.isArray(dest)) return;
+    const target = link.trim();
+    // The password is checked before any bytes download, so retries don't use up the link.
     const run = async (pw?: string): Promise<void> => {
-      try {
-        const p = await shareDownload(crypto.randomUUID(), link.trim(), dest, pw);
-        ctx.toast({ kind: "ok", text: baseName(p), action: { label: t("showInFolder"), run: () => revealItemInDir(p) } });
+      const r = await ctx.runJob(t("downloadTo"), async (id) => {
+        try {
+          return { path: await shareDownload(id, target, dest, pw) };
+        } catch (e) {
+          const err = asUiError(e);
+          if (err.code === "password_required" || err.code === "wrong_password") return { needPw: err.code === "wrong_password" };
+          throw e;
+        }
+      });
+      if (!r) return;
+      const got = r.path;
+      if (got) {
+        ctx.toast({ kind: "ok", text: baseName(got), action: { label: t("showInFolder"), run: () => revealItemInDir(got) } });
         setLink("");
-      } catch (e) {
-        const err = asUiError(e);
-        if (err.code === "password_required" || err.code === "wrong_password") askPassword(t("openLink"), (p2) => run(p2));
-        else ctx.fail(err);
+      } else {
+        askPassword(t("openLink"), (p2) => run(p2), r.needPw);
       }
     };
-    ctx.runJob(t("downloadTo"), () => run(password));
+    run();
   };
 
   const now = Date.now() / 1000;
@@ -343,7 +353,8 @@ export function HealthPanel({ ctx, archive }: { ctx: ViewCtx; archive: string })
     if (!h) return;
     setHealth(h);
     setMsg(
-      h.repaired > 0 ? t("damagedFixed", { n: num(h.repaired, lang) })
+      h.outdated ? t("repairOutdated")
+      : h.repaired > 0 ? t("damagedFixed", { n: num(h.repaired, lang) })
       : h.damaged === 0 && h.size_ok ? t("healthy", { blocks: num(h.blocks, lang) })
       : h.unrecoverable > 0 ? t("damagedLost", { n: num(h.unrecoverable, lang) })
       : t("damagedFixable", { n: num(h.damaged || 1, lang) }),
@@ -356,11 +367,12 @@ export function HealthPanel({ ctx, archive }: { ctx: ViewCtx; archive: string })
       reload();
     }
   };
-  const fixable = health && (health.damaged > 0 || !health.size_ok) && health.unrecoverable === 0 && health.repaired === 0;
+  const fixable = health && !health.outdated && (health.damaged > 0 || !health.size_ok) && health.unrecoverable === 0 && health.repaired === 0;
   return (
     <div className="health">
       {has === false && <p className="muted-p">{t("noRepairData")}</p>}
-      {msg && <p className={`health-msg ${health && health.unrecoverable > 0 ? "err" : "ok-text"}`}>{msg}</p>}
+      {msg && <p className={`health-msg ${health && (health.unrecoverable > 0 || health.outdated) ? "err" : "ok-text"}`}>{msg}</p>}
+      {health?.outdated && <button className="btn small" onClick={add}>{t("addRepair")}</button>}
       <div className="row gap">
         {has && <button className="btn small" onClick={() => check(false)}>{t("checkHealth")}</button>}
         {fixable && <button className="btn primary small" onClick={() => check(true)}>{t("repair")}</button>}

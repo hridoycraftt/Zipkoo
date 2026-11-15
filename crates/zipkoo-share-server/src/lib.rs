@@ -165,6 +165,22 @@ async fn blob(State(st): State<AppState>, Path(id): Path<String>) -> Response {
         .unwrap()
 }
 
+/// The first bytes of a share (header + encrypted name), so clients can check the password
+/// before downloading. Does not count as a download.
+async fn head(State(st): State<AppState>, Path(id): Path<String>) -> Response {
+    let Some(r) = st.load(&id).await else { return err(StatusCode::NOT_FOUND, "gone") };
+    if !AppState::alive(&r) {
+        return err(StatusCode::GONE, "gone");
+    }
+    let Ok(f) = tokio::fs::File::open(st.blob(&id)).await else { return err(StatusCode::NOT_FOUND, "gone") };
+    let mut buf = Vec::new();
+    use tokio::io::AsyncReadExt;
+    if f.take(45 + 65_536 + 16).read_to_end(&mut buf).await.is_err() {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "storage unavailable");
+    }
+    Response::builder().header(header::CONTENT_TYPE, "application/octet-stream").header(header::CACHE_CONTROL, "no-store").body(Body::from(buf)).unwrap()
+}
+
 async fn delete(State(st): State<AppState>, Path(id): Path<String>, headers: HeaderMap) -> Response {
     let token = headers.get("x-delete-token").and_then(|v| v.to_str().ok()).unwrap_or("");
     match st.load(&id).await {
@@ -221,6 +237,7 @@ pub fn app(cfg: Config) -> (Router, AppState) {
         .route("/api/shares", post(create))
         .route("/api/shares/{id}", get(meta).delete(delete))
         .route("/api/shares/{id}/blob", get(blob))
+        .route("/api/shares/{id}/head", get(head))
         .route("/s/{id}", get(page))
         .layer(axum::extract::DefaultBodyLimit::disable())
         .with_state(st.clone());

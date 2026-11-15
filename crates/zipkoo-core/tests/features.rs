@@ -149,7 +149,8 @@ fn heal_fixes_scattered_and_burst_damage() {
     // A burst of 150 KB (≈5% of the file) plus a few scattered hits.
     damage(&zip, 400_000, 150_000);
     damage(&zip, 10, 3);
-    damage(&zip, 2_500_000, 1);
+    let len = original.len() as u64;
+    damage(&zip, len - 5_000, 1);
     let h = heal::check(&zip, false, &mut |_| {}, None).unwrap();
     assert!(h.damaged > 0 && h.repairable(), "{h:?}");
     assert!(extract(&zip, &t.path().join("bad"), &ExtractOptions::default(), &mut |_| {}, None).is_err());
@@ -158,6 +159,88 @@ fn heal_fixes_scattered_and_burst_damage() {
     assert_eq!(h.repaired, h.damaged);
     assert_eq!(fs::read(&zip).unwrap(), original, "repaired file must match the original byte for byte");
     extract(&zip, &t.path().join("good"), &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+}
+
+#[test]
+fn heal_never_shrinks_a_grown_archive() {
+    let t = tempfile::tempdir().unwrap();
+    let (zip, original) = archive_with_repair(t.path(), 10);
+    let mut grown = original.clone();
+    grown.extend_from_slice(b"new data appended by another tool");
+    fs::write(&zip, &grown).unwrap();
+    let h = heal::check(&zip, true, &mut |_| {}, None).unwrap();
+    assert!(h.outdated && !h.repairable(), "{h:?}");
+    assert_eq!(fs::read(&zip).unwrap(), grown, "nothing may be cut off");
+}
+
+#[test]
+fn update_rebuilds_repair_data() {
+    let t = tempfile::tempdir().unwrap();
+    let src = tree(t.path());
+    let zip = t.path().join("p.zip");
+    pack(&[src.clone()], &zip, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    heal::create(&zip, 10, &mut |_| {}, None).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    fs::write(src.join("added.txt"), "x".repeat(10_000)).unwrap();
+    update::update(&zip, &[src], &update::UpdateOptions::default(), &mut |_| {}, None).unwrap();
+    let h = heal::check(&zip, false, &mut |_| {}, None).unwrap();
+    assert!(h.healthy(), "repair data must match the updated archive: {h:?}");
+}
+
+#[test]
+fn wrong_zip_password_caught_on_open_and_update() {
+    let t = tempfile::tempdir().unwrap();
+    let src = tree(t.path());
+    let zip = t.path().join("p.zip");
+    pack(&[src.clone()], &zip, &PackOptions { password: Some("right-one".into()), ..Default::default() }, &mut |_| {}, None).unwrap();
+    assert!(matches!(inspect(&zip, Some("typo")), Err(Error::WrongPassword)));
+    assert!(inspect(&zip, Some("right-one")).is_ok());
+    let opts = update::UpdateOptions { password: Some("typo"), ..Default::default() };
+    assert!(matches!(update::update(&zip, &[src], &opts, &mut |_| {}, None), Err(Error::WrongPassword)));
+}
+
+#[test]
+fn history_folder_is_not_extracted_or_counted() {
+    let t = tempfile::tempdir().unwrap();
+    let src = tree(t.path());
+    let zip = t.path().join("p.zip");
+    pack(&[src.clone()], &zip, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    fs::write(src.join("README.md"), "changed").unwrap();
+    update::update(&zip, &[src], &update::UpdateOptions::default(), &mut |_| {}, None).unwrap();
+    assert_eq!(inspect(&zip, None).unwrap().file_count, 3);
+    let d = t.path().join("out");
+    extract(&zip, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    assert!(!d.join(".zipkoo").exists());
+}
+
+#[test]
+fn opens_own_self_extracting_file_as_archive() {
+    let t = tempfile::tempdir().unwrap();
+    let src = tree(t.path());
+    // Any bytes work as a stand-in stub for reading.
+    let stub = t.path().join("stub.bin");
+    fs::write(&stub, vec![0x4d, 0x5a, 0, 0, 1, 2, 3]).unwrap();
+    let exe = t.path().join("Gift.exe");
+    sfx::build(&stub, &[src], &exe, &PackOptions::default(), &mut |_| {}, None).unwrap();
+    let info = inspect(&exe, None).unwrap();
+    assert_eq!((info.format, info.file_count), (Format::Zip, 3));
+    let d = t.path().join("x");
+    extract(&exe, &d, &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    assert!(d.join("Project/README.md").exists());
+}
+
+#[test]
+fn split_parts_leave_no_temp_files() {
+    let t = tempfile::tempdir().unwrap();
+    let src = tree(t.path());
+    let out = t.path().join("s.zip");
+    let r = pack(&[src], &out, &PackOptions { smart: false, split_size: Some(20_000), ..Default::default() }, &mut |_| {}, None).unwrap();
+    let before = fs::read_dir(std::env::temp_dir()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with(&format!("zipkoo-join-{}-", std::process::id()))).count();
+    inspect(&r.outputs[0], None).unwrap();
+    extract(&r.outputs[0], &t.path().join("x"), &ExtractOptions::default(), &mut |_| {}, None).unwrap();
+    let after = fs::read_dir(std::env::temp_dir()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with(&format!("zipkoo-join-{}-", std::process::id()))).count();
+    assert!(after <= before, "joined copies must be cleaned up ({before} -> {after})");
 }
 
 #[test]
