@@ -159,12 +159,17 @@ pub fn extract(
                     (true, Some(pw)) => z.by_index_decrypt(i, pw.as_bytes())?,
                     _ => z.by_index(i)?,
                 };
+                let mtime = f.last_modified().and_then(crate::meta::from_zip_time);
                 // A wrong AES password fails when the data is read, so map that here.
                 match ctx.write(&out, &mut f) {
                     Err(Error::Io(e)) if encrypted && e.to_string().to_lowercase().contains("password") => {
                         return Err(Error::WrongPassword)
                     }
                     other => other?,
+                }
+                drop(f);
+                if let Some(t) = mtime {
+                    crate::meta::set_mtime(&out, t);
                 }
             }
         }
@@ -179,7 +184,11 @@ pub fn extract(
                         std::io::copy(reader, &mut std::io::sink())?;
                         return Ok(());
                     };
-                    ctx.write(&out, reader)
+                    ctx.write(&out, reader)?;
+                    if entry.has_last_modified_date {
+                        crate::meta::set_mtime(&out, entry.last_modified_date.into());
+                    }
+                    Ok(())
                 })();
                 match res {
                     Ok(()) => Ok(true),
@@ -231,6 +240,9 @@ pub fn extract(
                 }
                 let Some(out) = ctx.target(&name, kind.is_dir())? else { continue };
                 ctx.write(&out, &mut e)?;
+                if let Ok(m) = e.header().mtime() {
+                    crate::meta::set_mtime(&out, std::time::UNIX_EPOCH + std::time::Duration::from_secs(m));
+                }
                 #[cfg(unix)]
                 if let Ok(mode) = e.header().mode() {
                     use std::os::unix::fs::PermissionsExt;

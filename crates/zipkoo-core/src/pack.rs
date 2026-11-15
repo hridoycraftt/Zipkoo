@@ -167,6 +167,9 @@ fn write_archive(items: &[Item], out: &Path, opts: &PackOptions, rep: &mut Repor
                     o = o.compression_method(CompressionMethod::Deflated).compression_level(Some(opts.level.deflate()));
                 }
                 o = o.large_file(it.size >= u32::MAX as u64);
+                if let Some(t) = fs::metadata(&it.src).ok().and_then(|m| m.modified().ok()).and_then(crate::meta::zip_time) {
+                    o = o.last_modified_time(t);
+                }
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
