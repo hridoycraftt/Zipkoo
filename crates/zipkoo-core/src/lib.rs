@@ -3,14 +3,18 @@
 //! Create: ZIP (Deflate, AES-256), 7z (LZMA2, AES-256), TAR.ZST.
 //! Open: ZIP, 7z, TAR, TAR.GZ, TAR.ZST, TAR.BZ2, TAR.XZ, RAR, plus split parts (.001).
 
+pub mod backup;
 pub mod convert;
+pub mod dupes;
 pub mod error;
 pub mod extract;
 pub mod format;
 pub mod hash;
 pub mod heal;
+pub mod index;
 pub mod inspect;
 pub mod meta;
+pub mod optimize;
 pub mod pack;
 pub mod progress;
 pub mod safety;

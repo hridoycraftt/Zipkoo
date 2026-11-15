@@ -181,3 +181,95 @@ fn heal_reports_too_much_damage() {
     assert!(!h.repairable(), "{h:?}");
     assert_eq!(h.repaired, 0, "never half-repair");
 }
+
+// ---------- Watch Folder snapshots (9) ----------
+
+#[test]
+fn snapshots_skip_unchanged_and_prune() {
+    let t = tempfile::tempdir().unwrap();
+    let src = tree(t.path());
+    let dest = t.path().join("Backups");
+    let opts = backup::BackupOptions { keep: 2, recovery_percent: Some(5), ..Default::default() };
+    let s1 = backup::snapshot(&src, &dest, &opts, &mut |_| {}, None).unwrap().expect("first snapshot");
+    assert!(heal::recovery_path(&s1.path).exists());
+    assert!(backup::snapshot(&src, &dest, &opts, &mut |_| {}, None).unwrap().is_none(), "nothing changed");
+    for i in 0..3 {
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::write(src.join("README.md"), format!("v{i}")).unwrap();
+        backup::snapshot(&src, &dest, &opts, &mut |_| {}, None).unwrap().expect("changed");
+    }
+    let all = backup::snapshots(&dest, "Project", Format::Zip);
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert!(!s1.path.exists() && !heal::recovery_path(&s1.path).exists());
+    assert_eq!(peek(all.last().unwrap(), "Project/README.md", None, 100).unwrap(), b"v2");
+}
+
+// ---------- Search, duplicates, photo shrinking (11) ----------
+
+#[test]
+fn search_across_archives() {
+    let t = tempfile::tempdir().unwrap();
+    let src = tree(t.path());
+    let lib = t.path().join("Library");
+    fs::create_dir_all(lib.join("deep/er")).unwrap();
+    pack(&[src.clone()], &lib.join("a.zip"), &PackOptions::default(), &mut |_| {}, None).unwrap();
+    pack(&[src.join("src")], &lib.join("deep/er/b.7z"), &PackOptions { format: Format::SevenZ, ..Default::default() }, &mut |_| {}, None).unwrap();
+    fs::write(lib.join("not-an-archive.txt"), "x").unwrap();
+    let found = index::find_archives(&lib, 8);
+    assert_eq!(found.len(), 2);
+
+    let mut ix = index::Index::open(&t.path().join("data/index.db")).unwrap();
+    let r = ix.refresh(&found).unwrap();
+    assert_eq!((r.indexed, r.unchanged), (2, 0));
+    assert_eq!(ix.refresh(&found).unwrap().unchanged, 2, "unchanged archives are not re-read");
+
+    let hits = ix.search("MAIN rs", 50).unwrap();
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().any(|h| h.archive.ends_with("b.7z") && h.name == "src/main.rs"));
+    assert!(ix.search("readme", 50).unwrap().iter().all(|h| h.archive.ends_with("a.zip")));
+    assert!(ix.search("nothing-like-this", 50).unwrap().is_empty());
+
+    fs::remove_file(lib.join("a.zip")).unwrap();
+    assert_eq!(ix.prune().unwrap(), 1);
+    assert_eq!(ix.stats().unwrap().0, 1);
+}
+
+#[test]
+fn finds_duplicates() {
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path().join("Pics");
+    fs::create_dir_all(d.join("copy")).unwrap();
+    let big: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    fs::write(d.join("a.jpg"), &big).unwrap();
+    fs::write(d.join("copy/a (1).jpg"), &big).unwrap();
+    let mut other = big.clone();
+    *other.last_mut().unwrap() ^= 1; // same size and same first 64 KB, different end
+    fs::write(d.join("b.jpg"), &other).unwrap();
+    fs::write(d.join("s1.txt"), "same").unwrap();
+    fs::write(d.join("s2.txt"), "same").unwrap();
+    let g = dupes::find(&[d.clone()], 1).unwrap();
+    assert_eq!(g.len(), 2);
+    assert_eq!(g[0].files.len(), 2);
+    assert_eq!(g[0].wasted, 200_000);
+    assert!(g[0].files.iter().all(|f| !f.ends_with("b.jpg")));
+}
+
+#[test]
+fn shrinks_photos_and_keeps_others() {
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path().join("Trip");
+    fs::create_dir_all(&d).unwrap();
+    let img = image::RgbImage::from_fn(4000, 3000, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x * y) % 256) as u8]));
+    img.save(d.join("big.jpg")).unwrap();
+    image::RgbImage::from_pixel(100, 80, image::Rgb([10, 200, 30])).save(d.join("small.png")).unwrap();
+    fs::write(d.join("notes.txt"), "keep me").unwrap();
+    let out = t.path().join("Trip-small");
+    let r = optimize::optimize(&[d.clone()], &out, &optimize::OptimizeOptions { max_edge: 1600, quality: 80 }).unwrap();
+    assert_eq!((r.images, r.copied), (2, 1));
+    assert!(r.after < r.before);
+    let (w, h) = image::image_dimensions(out.join("Trip/big.jpg")).unwrap();
+    assert_eq!(w.max(h), 1600);
+    assert_eq!(fs::read(out.join("Trip/notes.txt")).unwrap(), b"keep me");
+    assert!(out.join("Trip/small.png").exists());
+    assert!(d.join("big.jpg").exists(), "originals untouched");
+}
