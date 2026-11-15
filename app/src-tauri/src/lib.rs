@@ -1,4 +1,5 @@
 //! Tauri commands that expose zipkoo-core to the UI.
+pub mod features;
 pub mod shell;
 
 use serde::{Deserialize, Serialize};
@@ -11,13 +12,13 @@ use shell::{Inbox, ShellAction};
 use zipkoo_core::{ArchiveInfo, ExtractOptions, ExtractReport, Format, Level, PackOptions, PackReport, Progress};
 
 #[derive(Default)]
-struct Jobs(Mutex<HashMap<String, Arc<AtomicBool>>>);
+pub struct Jobs(pub Mutex<HashMap<String, Arc<AtomicBool>>>);
 
 /// Errors cross to the UI as plain sentences plus a machine code.
 #[derive(Debug, Serialize)]
-struct UiError {
-    code: &'static str,
-    message: String,
+pub struct UiError {
+    pub code: &'static str,
+    pub message: String,
 }
 
 impl From<zipkoo_core::Error> for UiError {
@@ -57,6 +58,12 @@ struct PackRequest {
     /// Build a self-extracting program instead of a plain archive (ZIP payload).
     #[serde(default)]
     sfx: bool,
+    /// Resize and re-encode photos into a temporary copy before packing.
+    #[serde(default)]
+    shrink_photos: bool,
+    /// Write Self-heal repair data next to each output (percent).
+    #[serde(default)]
+    repair_percent: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -110,13 +117,36 @@ async fn pack_files(app: AppHandle, jobs: State<'_, Jobs>, job: String, req: Pac
         let mut emit = |p: &Progress| {
             let _ = app.emit("job-progress", JobEvent { job: &job2, progress: p });
         };
-        if req.sfx {
-            let stub = sfx_stub(&app).ok_or_else(|| {
-                zipkoo_core::Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "The self-extracting stub is missing from this install."))
-            })?;
-            return zipkoo_core::sfx::build(&stub, &req.inputs, &req.output, &opts, &mut emit, Some(&cancel));
+        // Optional photo shrinking into a temporary copy next to the output.
+        let parent = req.output.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let shrink_dir = req.shrink_photos.then(|| zipkoo_core::unique_path(&parent.join(".zipkoo-shrink")));
+        let inputs: Vec<PathBuf> = match &shrink_dir {
+            Some(dir) => {
+                zipkoo_core::optimize::optimize(&req.inputs, dir, &Default::default())?;
+                let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+                v.sort();
+                v
+            }
+            None => req.inputs.clone(),
+        };
+        let res = if req.sfx {
+            match sfx_stub(&app) {
+                Some(stub) => zipkoo_core::sfx::build(&stub, &inputs, &req.output, &opts, &mut emit, Some(&cancel)),
+                None => Err(zipkoo_core::Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "The self-extracting stub is missing from this install."))),
+            }
+        } else {
+            zipkoo_core::pack(&inputs, &req.output, &opts, &mut emit, Some(&cancel))
+        };
+        if let Some(dir) = &shrink_dir {
+            let _ = std::fs::remove_dir_all(dir);
         }
-        zipkoo_core::pack(&req.inputs, &req.output, &opts, &mut emit, Some(&cancel))
+        let report = res?;
+        if let Some(p) = req.repair_percent {
+            for out in &report.outputs {
+                zipkoo_core::heal::create(out, p, &mut |_| {}, Some(&cancel))?;
+            }
+        }
+        Ok::<_, zipkoo_core::Error>(report)
     })
     .await
     .map_err(|e| UiError { code: "error", message: e.to_string() })?;
@@ -273,12 +303,15 @@ pub fn run() {
         .manage(Jobs::default())
         .manage(Inbox::default())
         .manage(Pending::default())
+        .manage(features::SearchIndex::default())
+        .manage(features::Watches::default())
         .setup(|app| {
             #[cfg(debug_assertions)]
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("Zipkoo (dev)");
             }
             receive(app.handle(), std::env::args().skip(1).collect());
+            features::start_scheduler(app.handle().clone());
             // Move merged clicks to the UI once their merge window closes.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -304,7 +337,26 @@ pub fn run() {
             suggest_extract_dest,
             shell_status,
             shell_set,
-            take_shell_actions
+            take_shell_actions,
+            features::convert_archives,
+            features::update_archive,
+            features::archive_history,
+            features::heal_status,
+            features::heal_create,
+            features::heal_check,
+            features::find_duplicates,
+            features::cloud_folders,
+            features::list_archives,
+            features::index_refresh,
+            features::search_archives,
+            features::share_file,
+            features::shares_list,
+            features::share_delete,
+            features::share_download,
+            features::watches_list,
+            features::watch_save,
+            features::watch_remove,
+            features::watch_run_now
         ])
         .build(tauri::generate_context!())
         .expect("error while building Zipkoo")

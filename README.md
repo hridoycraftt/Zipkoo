@@ -18,7 +18,13 @@
 | Right-click menu: Explorer (registry, per user) and Finder (Quick Actions) | ✅ |
 | Self-extracting `.exe` (Windows), optional AES-256 password | ✅ |
 | From 0-byte files to files over 4 GB (ZIP64), 100,000+ entries, free-space check | ✅ |
-| Secure Share, Smart Update, Self-heal, Watch Folder, Cloud, global search, Batch convert | 🔜 roadmap |
+| Secure Share: end-to-end encrypted links with expiry, download limit, optional password | ✅ (needs a deployed share server) |
+| Smart Update (ZIP): only new/changed files, version history inside the archive | ✅ |
+| Self-heal: Reed-Solomon repair data (`.zkrec`), fixes damage and cut-off downloads | ✅ |
+| Watch Folder: scheduled snapshots when a folder changes, keep newest N | ✅ |
+| Cloud: Google Drive, Dropbox, OneDrive, iCloud folders on this computer | ✅ (desktop-app folders, no direct API) |
+| Search inside every archive, duplicate finder, photo shrinking | ✅ |
+| Batch Convert (incl. RAR → ZIP/7z/TAR.ZST) and a full CLI | ✅ |
 
 ## Layout
 
@@ -26,6 +32,7 @@
 crates/zipkoo-core   Rust library: pack, inspect, peek, safe extract, split, hash
 crates/zipkoo-cli    `zipkoo` command line
 crates/zipkoo-sfx    Self-extracting stub (~750 KB); the payload ZIP is appended to it
+crates/zipkoo-share-server  Stores encrypted shares; serves the in-browser download page
 app/                 Desktop app: React + Vite UI, Tauri 2 shell in app/src-tauri
 .github/workflows    CI tests on Windows/macOS/Linux; tagged releases build installers
 ```
@@ -50,6 +57,20 @@ cargo run -p zipkoo-cli -- pack ./Photos -f 7z --lock
   (Finder › right-click › Quick Actions).
 - Explorer starts one process per selected file; the app merges clicks that arrive within 400 ms
   into one job.
+
+## Share server
+
+Links are end-to-end encrypted: files are encrypted in the app (AES-256-GCM), the key travels in the
+link's `#` fragment, and the server only stores ciphertext. Run the server anywhere with a disk and put it
+behind HTTPS:
+
+```bash
+cargo build --release -p zipkoo-share-server
+ZIPKOO_SHARE_DIR=/var/lib/zipkoo ZIPKOO_SHARE_ADDR=0.0.0.0:8080 ./target/release/zipkoo-share-server
+```
+
+Optional: `ZIPKOO_SHARE_MAX_BYTES` (default 20 GB), `ZIPKOO_SHARE_MAX_HOURS` (default 168).
+Then enter its address in the app under Shared links.
 
 ## Release
 

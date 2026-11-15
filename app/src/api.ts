@@ -47,7 +47,7 @@ export interface ExtractReport {
 }
 
 export interface UiError {
-  code: "password_required" | "wrong_password" | "too_large" | "no_space" | "cancelled" | "unsupported" | "damaged" | "error";
+  code: "password_required" | "wrong_password" | "too_large" | "no_space" | "no_server" | "cancelled" | "unsupported" | "damaged" | "error";
   message: string;
 }
 
@@ -82,6 +82,8 @@ export interface PackRequest {
   hideNames: boolean;
   splitSize: number | null;
   sfx: boolean;
+  shrinkPhotos?: boolean;
+  repairPercent?: number | null;
 }
 
 export const packFiles = (job: string, req: PackRequest) => invoke<PackReport>("pack_files", { job, req });
@@ -118,3 +120,41 @@ export function onProgress(cb: (job: string, p: Progress) => void): Promise<Unli
 
 const ARCHIVE_RE = /\.(zip|7z|rar|tar|tgz|tzst|tbz2|txz|gz|zst|bz2|xz|001)$/i;
 export const isArchive = (p: string) => ARCHIVE_RE.test(p);
+
+// ---------- Features 6–12 ----------
+export interface UpdateReport { version: number; added: number; changed: number; removed: number; unchanged: number; bytes_packed: number }
+export interface Version { version: number; time: number; added: string[]; changed: string[]; removed: string[] }
+export interface Health { blocks: number; damaged: number; unrecoverable: number; size_ok: boolean; repaired: number }
+export interface DupGroup { size: number; files: string[]; wasted: number }
+export interface CloudFolder { provider: string; label: string; path: string }
+export interface FolderItem { path: string; size: number; modified: number }
+export interface Hit { archive: string; name: string; size: number }
+export interface IndexStats { archives: number; files: number; indexed_now: number }
+export interface ShareRecord { url: string; id: string; deleteToken: string; expiresAt: number; maxDownloads: number | null; password: boolean; name: string; size: number; created: number; server: string }
+export interface Watch { id: string; folder: string; dest: string; intervalMinutes: number; keep: number; repair: boolean; paused: boolean; lastRun: number | null; lastResult: string | null; lastOk: boolean }
+export interface ConvertResult { source: string; output: string | null; error: string | null; output_bytes: number }
+
+export const convertArchives = (jobId: string, archives: string[], format: "zip" | "seven-z" | "tar-zst", password?: string) =>
+  invoke<ConvertResult[]>("convert_archives", { jobId, archives, format, password: password ?? null });
+export const updateArchive = (jobId: string, archive: string, inputs: string[], password?: string, removeMissing = false) =>
+  invoke<UpdateReport>("update_archive", { jobId, archive, inputs, password: password ?? null, removeMissing });
+export const archiveHistory = (archive: string) => invoke<{ versions: Version[] }>("archive_history", { archive });
+export const healStatus = (archive: string) => invoke<{ has_repair_data: boolean }>("heal_status", { archive });
+export const healCreate = (jobId: string, archive: string, percent = 10) => invoke<{ path: string; size: number }>("heal_create", { jobId, archive, percent });
+export const healCheck = (jobId: string, archive: string, fix: boolean) => invoke<Health>("heal_check", { jobId, archive, fix });
+export const findDuplicates = (inputs: string[]) => invoke<DupGroup[]>("find_duplicates", { inputs });
+export const cloudFolders = () => invoke<CloudFolder[]>("cloud_folders");
+export const listArchives = (folder: string) => invoke<FolderItem[]>("list_archives", { folder });
+export const indexRefresh = (extra: string[]) => invoke<IndexStats>("index_refresh", { extra });
+export const searchArchives = (query: string) => invoke<Hit[]>("search_archives", { query });
+export const shareFile = (jobId: string, path: string, server: string, hours: number, downloads: number | null, password: string | null) =>
+  invoke<ShareRecord>("share_file", { jobId, path, server, hours, downloads, password });
+export const sharesList = () => invoke<ShareRecord[]>("shares_list");
+export const shareDelete = (id: string) => invoke<void>("share_delete", { id });
+export const shareDownload = (jobId: string, link: string, dest: string, password?: string) =>
+  invoke<string>("share_download", { jobId, link, dest, password: password ?? null });
+export const watchesList = () => invoke<Watch[]>("watches_list");
+export const watchSave = (watch: Watch) => invoke<Watch[]>("watch_save", { watch });
+export const watchRemove = (id: string) => invoke<Watch[]>("watch_remove", { id });
+export const watchRunNow = (id: string) => invoke<Watch[]>("watch_run_now", { id });
+export const onEvent = (name: string, cb: () => void) => listen(name, cb);

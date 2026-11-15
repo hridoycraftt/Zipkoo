@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { FORMAT_EXT, suggestPackOutput, type Level, type PackRequest } from "../api";
+import { FORMAT_EXT, suggestPackOutput, type CloudFolder, type Level, type PackRequest } from "../api";
 import type { Lang, makeT } from "../i18n";
 import { baseName, num, toBn } from "../util";
 
@@ -19,6 +19,7 @@ interface Props {
   lang: Lang;
   inputs: string[];
   sfxEnabled: boolean;
+  clouds?: CloudFolder[];
   preset?: PackPreset;
   onCancel: () => void;
   onStart: (req: PackRequest) => void;
@@ -32,7 +33,9 @@ const SPLITS: { label: string; bytes: number | null }[] = [
   { label: "4 GB", bytes: 4 * 1024 ** 3 - 1 },
 ];
 
-export function PackSheet({ t, lang, inputs, sfxEnabled, preset, onCancel, onStart }: Props) {
+export function PackSheet({ t, lang, inputs, sfxEnabled, clouds = [], preset, onCancel, onStart }: Props) {
+  const [shrink, setShrink] = useState(false);
+  const [repair, setRepair] = useState(false);
   const [choice, setChoice] = useState<Choice>(preset?.sfx && sfxEnabled ? "sfx" : "zip");
   const [level, setLevel] = useState<Level>("normal");
   const [smart, setSmart] = useState(true);
@@ -80,6 +83,8 @@ export function PackSheet({ t, lang, inputs, sfxEnabled, preset, onCancel, onSta
       hideNames: choice === "seven-z" && hideNames,
       splitSize: canSplit ? SPLITS[split].bytes : null,
       sfx,
+      shrinkPhotos: shrink,
+      repairPercent: repair && !sfx ? 10 : null,
     });
   };
 
@@ -124,6 +129,18 @@ export function PackSheet({ t, lang, inputs, sfxEnabled, preset, onCancel, onSta
           <span><b>{t("smart")}</b><small>{t("smartHint")}</small></span>
         </label>
 
+        <label className="toggle">
+          <input id="shrink" type="checkbox" checked={shrink} onChange={(e) => setShrink(e.target.checked)} />
+          <span><b>{t("shrinkPhotos")}</b><small>{t("shrinkHint")}</small></span>
+        </label>
+
+        {choice !== "sfx" && (
+          <label className="toggle">
+            <input id="repair" type="checkbox" checked={repair} onChange={(e) => setRepair(e.target.checked)} />
+            <span><b>{t("repairData")}</b><small>{t("repairDataHint")}</small></span>
+          </label>
+        )}
+
         {canLock && (
           <label className="toggle">
             <input id="lock" type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} />
@@ -156,6 +173,17 @@ export function PackSheet({ t, lang, inputs, sfxEnabled, preset, onCancel, onSta
               ))}
             </div>
           </fieldset>
+        )}
+
+        {clouds.length > 0 && (
+          <div className="cloud-chips">
+            <span className="saveas-label">{t("cloudSave")}</span>
+            {clouds.map((c) => (
+              <button type="button" key={c.path} className="chip-btn" onClick={() => setCustomOut(`${c.path}${c.path.includes("\\") ? "\\" : "/"}${(output.split(/[\\/]/).pop() ?? "Archive").replace(/\.[^.]+$/, "")}`)}>
+                {c.label}
+              </button>
+            ))}
+          </div>
         )}
 
         <div className="saveas">

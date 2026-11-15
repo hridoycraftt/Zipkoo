@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
+  cloudFolders, convertArchives, shareFile, updateArchive, type CloudFolder,
   asUiError, cancelJob, extractArchive, inspectArchive, isArchive, onProgress, onShellActions, packFiles, sfxAvailable,
   shellSet, shellStatus, suggestExtractDest, suggestPackOutput, takeShellActions,
   type ArchiveInfo, type PackRequest, type Progress, type ShellAction, type ShellStatus, type UiError,
@@ -15,6 +16,9 @@ import { Home } from "./components/Home";
 import { ArchiveView } from "./components/ArchiveView";
 import { PackSheet, type PackPreset } from "./components/PackSheet";
 import { PasswordDialog, ProgressOverlay, Toast, type ToastData } from "./components/Overlays";
+import { FolderView, SearchView, SharesView, ShareSheet, ToolsView, WatchView, type ViewCtx } from "./components/Views";
+
+type View = { kind: "home" | "search" | "watch" | "shares" | "tools" } | { kind: "cloud"; folder: CloudFolder };
 
 const store = {
   get<T>(k: string, d: T): T {
@@ -50,6 +54,16 @@ export default function App() {
   const [skipPrograms, setSkipPrograms] = useState(true);
   const [sfxOk, setSfxOk] = useState(false);
   const [shell, setShell] = useState<ShellStatus>({ supported: false, installed: false });
+  const [view, setView] = useState<View>({ kind: "home" });
+  const [clouds, setClouds] = useState<CloudFolder[]>([]);
+  const [shareServer, setShareServerState] = useState<string>(() => store.get("shareServer", ""));
+  const setShareServer = (v: string) => {
+    setShareServerState(v);
+    store.set("shareServer", v);
+  };
+  const [shareTarget, setShareTarget] = useState<string | null>(null);
+  const [convertTarget, setConvertTarget] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -59,6 +73,7 @@ export default function App() {
   useEffect(() => {
     sfxAvailable().then(setSfxOk).catch(() => {});
     shellStatus().then(setShell).catch(() => {});
+    cloudFolders().then(setClouds).catch(() => {});
   }, []);
 
   const remember = useCallback((p: string) => {
@@ -76,6 +91,7 @@ export default function App() {
       : e.code === "no_space" ? t("noSpace", { need: human(Number(e.message.split("|")[0]), lang), free: human(Number(e.message.split("|")[1]), lang) })
       : e.code === "unsupported" ? t("unsupported")
       : e.code === "damaged" ? `${t("damaged")} ${e.message}`
+      : e.code === "no_server" ? t("needServer")
       : e.message,
     [t, lang],
   );
@@ -86,6 +102,23 @@ export default function App() {
       setToast(e.code === "cancelled" ? { kind: "info", text: t("cancelled") } : { kind: "err", text: errorText(e) });
     },
     [t, errorText],
+  );
+
+  /** Run any long task behind the progress overlay; errors become toasts. */
+  const runJob = useCallback(
+    async <R,>(title: string, fn: (jobId: string) => Promise<R>): Promise<R | undefined> => {
+      const id = uid();
+      setJob({ id, kind: "pack", title, progress: null });
+      try {
+        return await fn(id);
+      } catch (err) {
+        failToast(err);
+        return undefined;
+      } finally {
+        setJob((j) => (j?.id === id ? null : j));
+      }
+    },
+    [failToast],
   );
 
   /** Ask for a password, then retry with it. */
@@ -309,6 +342,59 @@ export default function App() {
     }
   };
 
+  const ctx: ViewCtx = useMemo(
+    () => ({ t, lang, toast: setToast, runJob, openPath: (p: string) => openPath(p), fail: failToast }),
+    [t, lang, runJob, openPath, failToast],
+  );
+
+  const go = (v: View) => {
+    setArchive(null);
+    setView(v);
+  };
+
+  const createShare = async (hours: number, downloads: number | null, password: string | null) => {
+    const path = shareTarget;
+    setShareTarget(null);
+    if (!path) return;
+    if (!shareServer) {
+      setToast({ kind: "err", text: t("needServer"), action: { label: t("navShares"), run: () => go({ kind: "shares" }) } });
+      return;
+    }
+    const rec = await runJob(t("sharing"), (id) => shareFile(id, path, shareServer, hours, downloads, password));
+    if (!rec) return;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(rec.url);
+      copied = true;
+    } catch {
+      /* clipboard refused */
+    }
+    setToast({ kind: "ok", text: copied ? t("shareDone") : rec.name, sub: rec.url, action: { label: t("navShares"), run: () => go({ kind: "shares" }) } });
+  };
+
+  const updateCurrent = async () => {
+    if (!archive) return;
+    const res = await openDialog({ directory: true, title: t("updateHint"), defaultPath: dirName(archive.info.path) });
+    if (!res || Array.isArray(res)) return;
+    const { info, password } = archive;
+    const r = await runJob(t("updating"), (id) => updateArchive(id, info.path, [res], password));
+    if (!r) return;
+    setToast({ kind: "ok", text: t("updateDone", { v: num(r.version, lang), added: num(r.added, lang), changed: num(r.changed, lang), removed: num(r.removed, lang), unchanged: num(r.unchanged, lang) }) });
+    await openPath(info.path, password);
+    setRevision((n) => n + 1);
+  };
+
+  const convertTo = async (format: "zip" | "seven-z" | "tar-zst") => {
+    const src = convertTarget;
+    setConvertTarget(null);
+    if (!src) return;
+    const r = await runJob(t("converting"), (id) => convertArchives(id, [src], format, archive?.password));
+    const first = r?.[0];
+    if (!first) return;
+    if (first.output) setToast({ kind: "ok", text: `${baseName(src)} → ${baseName(first.output)}`, action: { label: t("showInFolder"), run: () => revealItemInDir(first.output!) } });
+    else setToast({ kind: "err", text: first.error ?? t("damaged") });
+  };
+
   return (
     <div className={`app ${dragging ? "dragging" : ""}`}>
       <nav className="side" aria-label="Zipkoo">
@@ -316,10 +402,25 @@ export default function App() {
           <Mark size={30} />
           <span className="wordmark">zipkoo</span>
         </div>
-        <button className={`nav ${!archive ? "on" : ""}`} onClick={() => setArchive(null)}>
-          <Icon name="home" />
-          {t("home")}
-        </button>
+        {([
+          ["home", "home", t("home")],
+          ["search", "search", t("navSearch")],
+          ["watch", "clock", t("navWatch")],
+          ["shares", "lock", t("navShares")],
+          ["tools", "shield", t("navTools")],
+        ] as const).map(([k, icon, label]) => (
+          <button key={k} className={`nav ${!archive && view.kind === k ? "on" : ""}`} onClick={() => go({ kind: k })}>
+            <Icon name={icon} />
+            {label}
+          </button>
+        ))}
+        {clouds.length > 0 && <h2 className="side-label">{t("navCloud")}</h2>}
+        {clouds.map((c) => (
+          <button key={c.path} className={`nav file ${!archive && view.kind === "cloud" && view.folder.path === c.path ? "on" : ""}`} title={c.path} onClick={() => go({ kind: "cloud", folder: c })}>
+            <Icon name="globe" size={16} />
+            <span className="ellipsis">{c.label}</span>
+          </button>
+        ))}
         <h2 className="side-label">{t("recent")}</h2>
         <div className="side-recent">
           {recent.slice(0, 8).map((p) => (
@@ -356,7 +457,22 @@ export default function App() {
             setSkipPrograms={setSkipPrograms}
             onExtract={extractFromView}
             onClose={() => setArchive(null)}
+            ctx={ctx}
+            onShare={() => setShareTarget(archive.info.path)}
+            onUpdate={updateCurrent}
+            onConvert={() => setConvertTarget(archive.info.path)}
+            revision={revision}
           />
+        ) : view.kind === "search" ? (
+          <SearchView ctx={ctx} extra={recent} />
+        ) : view.kind === "watch" ? (
+          <WatchView ctx={ctx} />
+        ) : view.kind === "shares" ? (
+          <SharesView ctx={ctx} server={shareServer} setServer={setShareServer} askPassword={(name, retry) => setPwPrompt({ path: name, then: (pw) => { setPwPrompt(null); retry(pw); } })} />
+        ) : view.kind === "tools" ? (
+          <ToolsView ctx={ctx} />
+        ) : view.kind === "cloud" ? (
+          <FolderView ctx={ctx} folder={view.folder} />
         ) : (
           <Home t={t} recent={recent} onPackFiles={() => pick("files")} onPackFolder={() => pick("folder")} onOpen={() => pick("archive")} onOpenPath={openPath} />
         )}
@@ -368,7 +484,22 @@ export default function App() {
           <span>{t("dragHere")}</span>
         </div>
       )}
-      {pack && <PackSheet t={t} lang={lang} inputs={pack.inputs} preset={pack.preset} sfxEnabled={sfxOk} onCancel={() => setPack(null)} onStart={startPack} />}
+      {pack && <PackSheet t={t} lang={lang} inputs={pack.inputs} preset={pack.preset} sfxEnabled={sfxOk} clouds={clouds} onCancel={() => setPack(null)} onStart={startPack} />}
+      {shareTarget && <ShareSheet t={t} name={baseName(shareTarget)} onCancel={() => setShareTarget(null)} onCreate={createShare} />}
+      {convertTarget && (
+        <div className="scrim" role="dialog" aria-modal="true" aria-labelledby="conv-title">
+          <div className="sheet narrow">
+            <h2 id="conv-title">{t("convertThis").replace("…", "")}: {baseName(convertTarget)}</h2>
+            <p>{t("convertSub")}</p>
+            <div className="row gap">
+              {(["zip", "seven-z", "tar-zst"] as const).map((f) => (
+                <button key={f} className="btn" onClick={() => convertTo(f)}>{({ zip: "ZIP", "seven-z": "7Z", "tar-zst": "TAR.ZST" } as const)[f]}</button>
+              ))}
+            </div>
+            <div className="row end"><button className="btn quiet" onClick={() => setConvertTarget(null)}>{t("cancel")}</button></div>
+          </div>
+        </div>
+      )}
       {pwPrompt && (
         <PasswordDialog t={t} name={baseName(pwPrompt.path)} error={pwPrompt.error} onSubmit={(pw) => pwPrompt.then(pw)} onCancel={() => setPwPrompt(null)} />
       )}

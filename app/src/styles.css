@@ -315,3 +315,92 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
 }
 
 .side-switch { font-size: 13px; color: var(--ink-2); padding: 4px 8px 6px; }
+
+/* ---------- Pages (Search, Watch folders, Shared links, Tools, Cloud) ---------- */
+.page { height: 100%; overflow: auto; background: var(--pane); border-radius: var(--r-lg); box-shadow: var(--shadow-pane); padding: 30px 32px 36px; display: flex; flex-direction: column; gap: 18px; }
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+.page-head > div { display: flex; flex-direction: column; gap: 6px; max-width: 62ch; }
+.page-head h1 { font-size: 24px; line-height: 1.25; font-weight: 700; }
+.page .lede { font-size: 14.5px; }
+.meta-line { font-size: 13px; color: var(--muted); margin-top: -6px; }
+.empty.pad { padding: 18px 2px; }
+.ok-text { color: var(--teal); }
+.err { color: var(--danger); }
+.nowrap { flex-wrap: nowrap; }
+.muted-inline { color: var(--muted); }
+
+.search.big { flex: none; height: 52px; border-radius: 14px; font-size: 16px; padding: 0 16px; }
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rows .empty { padding: 14px 4px; }
+.row-btn { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 12px; border-radius: var(--r-md); border: 0; background: none; cursor: pointer; transition: background 0.12s; }
+.row-btn:hover { background: var(--pane-2); }
+.row-btn .names { flex: 1; }
+.row-btn .num, .rows .num { font-size: 13.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rows.compact { gap: 6px; }
+
+/* Shared links */
+.block { padding: 16px 18px; border-radius: 14px; background: var(--pane-2); }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field > span { font-weight: 650; font-size: 14px; }
+.field small { color: var(--muted); font-size: 12.5px; }
+.field input { flex: 1; min-width: 0; height: 42px; padding: 0 14px; border-radius: var(--r-md); border: 1px solid var(--hair-strong); background: var(--pane); user-select: text; }
+.field input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 4px rgb(23 120 106 / 0.12); }
+.share-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--r-md); }
+.share-row:hover { background: var(--pane-2); }
+.share-row .names { flex: 1; }
+.sheet input[type="password"]:not(.pw input) { height: 44px; }
+
+/* Watch folders */
+.watch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.watch { display: flex; flex-direction: column; gap: 12px; padding: 16px 4px; border-top: 1px solid var(--hair); }
+.watch:first-child { border-top: 0; }
+.watch.is-paused .watch-main { opacity: 0.6; }
+.watch-main { display: flex; gap: 12px; align-items: flex-start; }
+.watch-main .names { gap: 2px; }
+.watch-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding-left: 46px; }
+.inline-field { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+.inline-field select { height: 32px; border-radius: 9px; border: 1px solid var(--hair-strong); background: var(--pane); padding: 0 8px; font: inherit; color: var(--ink); }
+.muted-flag { color: var(--muted); background: var(--pane-2); margin-left: 8px; }
+
+/* Tools */
+.tool { display: flex; flex-direction: column; gap: 14px; padding: 22px 0; border-top: 1px solid var(--hair); }
+.tool:first-of-type { border-top: 0; padding-top: 4px; }
+.tool-head { display: flex; gap: 14px; align-items: flex-start; }
+.tool-head h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.015em; }
+.tool-head p { color: var(--muted); font-size: 13.5px; margin-top: 2px; max-width: 60ch; }
+.tool > .row, .tool > .rows, .tool > .meta-line, .tool > .health { margin-left: 48px; }
+.result-row { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.dup { padding: 10px 12px; border-radius: var(--r-md); background: var(--pane-2); display: flex; flex-direction: column; gap: 4px; }
+.dup-size { font-weight: 650; font-size: 13.5px; }
+.dup ul { list-style: none; margin: 0; padding: 0; }
+.path-link { font-weight: 500; color: var(--ink-2); font-size: 12.5px; text-align: left; word-break: break-all; }
+
+/* Archive side panel tabs */
+.tabs { display: flex; gap: 2px; padding: 3px; border-radius: var(--r-md); background: var(--pane-2); align-self: flex-start; }
+.tabs button { border: 0; background: none; height: 30px; padding: 0 12px; border-radius: 9px; font-weight: 600; font-size: 13px; color: var(--muted); cursor: pointer; }
+.tabs button.on { background: var(--pane); color: var(--ink); box-shadow: var(--shadow-btn); }
+.versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.versions li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 2px; border-bottom: 1px solid var(--hair); font-size: 13.5px; }
+.versions .path { grid-column: 1; }
+.vchips { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 4px; align-items: center; }
+.vchip { font-size: 12px; font-weight: 650; padding: 1px 7px; border-radius: 99px; font-variant-numeric: tabular-nums; }
+.vchip.add { background: var(--teal-wash); color: var(--teal); }
+.vchip.chg { background: var(--haldi-wash); color: var(--haldi-deep); }
+.vchip.del { background: var(--danger-wash); color: var(--danger); }
+.health { display: flex; flex-direction: column; gap: 12px; }
+.health-msg { font-weight: 600; font-size: 14px; }
+.muted-p { color: var(--muted); font-size: 13.5px; }
+
+/* Pack sheet: cloud destinations */
+.cloud-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chip-btn { height: 30px; padding: 0 12px; border-radius: 99px; border: 1px solid var(--hair-strong); background: var(--pane); font-size: 13px; font-weight: 600; cursor: pointer; }
+.chip-btn:hover { border-color: var(--teal); color: var(--teal); }
+
+@media (max-width: 1020px) {
+  .page { padding: 22px 20px; }
+  .watch-controls, .tool > .row, .tool > .rows, .tool > .meta-line, .tool > .health { padding-left: 0; margin-left: 0; }
+}
+
+.tool-buttons { display: flex; gap: 6px; flex: none; }
+.watch-buttons { display: inline-flex; gap: 4px; margin-left: auto; flex-wrap: nowrap; }
+.icon-btn { width: 42px; height: 42px; padding: 0; justify-content: center; }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { asUiError, FORMAT_LABEL, peekFile, type ArchiveInfo, type Entry } from "../api";
+import { archiveHistory, asUiError, FORMAT_LABEL, peekFile, type ArchiveInfo, type Entry, type Version } from "../api";
+import { HealthPanel, type ViewCtx } from "./Views";
 import type { Lang, makeT } from "../i18n";
 import { baseName, human, mimeFor, num, previewKind } from "../util";
 import { fileIcon, Icon } from "./Icon";
@@ -13,6 +14,12 @@ interface Props {
   setSkipPrograms: (v: boolean) => void;
   onExtract: (only: string[], chooseDest: boolean) => void;
   onClose: () => void;
+  ctx: ViewCtx;
+  onShare: () => void;
+  onUpdate: () => void;
+  onConvert: () => void;
+  /** Bumped after an update so the history reloads. */
+  revision: number;
 }
 
 type PeekState =
@@ -24,7 +31,14 @@ type PeekState =
   | { kind: "none" }
   | { kind: "error"; message: string };
 
-export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipPrograms, onExtract, onClose }: Props) {
+export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipPrograms, onExtract, onClose, ctx, onShare, onUpdate, onConvert, revision }: Props) {
+  const [tab, setTab] = useState<"preview" | "history" | "health">("preview");
+  const [versions, setVersions] = useState<Version[] | null>(null);
+  const isZip = info.format === "zip";
+  useEffect(() => {
+    if (tab !== "history" || !isZip) return;
+    archiveHistory(info.path).then((m) => setVersions(m.versions)).catch(() => setVersions([]));
+  }, [tab, info.path, isZip, revision]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [focus, setFocus] = useState<Entry | null>(null);
@@ -32,7 +46,7 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return info.entries.filter((e) => !q || e.name.toLowerCase().includes(q));
+    return info.entries.filter((e) => !e.name.startsWith(".zipkoo/") && (!q || e.name.toLowerCase().includes(q)));
   }, [info.entries, query]);
 
   const saved = info.total_size > 0 ? Math.max(0, Math.round(100 - (info.archive_size / info.total_size) * 100)) : 0;
@@ -132,6 +146,11 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
             <Icon name="search" size={17} />
             <input id="archive-search" placeholder={t("search")} value={query} onChange={(e) => setQuery(e.target.value)} />
           </label>
+          <div className="tool-buttons">
+            <button className="btn icon-btn" onClick={onShare} title={t("shareLink")} aria-label={t("shareLink")}><Icon name="lock" size={18} /></button>
+            {isZip && <button className="btn icon-btn" onClick={onUpdate} title={`${t("updateArchive")} ${t("updateHint")}`} aria-label={t("updateArchive")}><Icon name="pack" size={18} /></button>}
+            <button className="btn icon-btn" onClick={onConvert} title={t("convertThis")} aria-label={t("convertThis")}><Icon name="zip" size={18} /></button>
+          </div>
           {selected.size > 0 && (
             <span className="selcount">
               {t("selectedN", { n: n(selected.size) })}
@@ -209,8 +228,30 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
       </section>
 
       <aside className="peek" aria-label={t("previewTitle")}>
+        <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === "preview"} className={tab === "preview" ? "on" : ""} onClick={() => setTab("preview")}>{t("previewTitle")}</button>
+          {isZip && <button role="tab" aria-selected={tab === "history"} className={tab === "history" ? "on" : ""} onClick={() => setTab("history")}>{t("history")}</button>}
+          <button role="tab" aria-selected={tab === "health"} className={tab === "health" ? "on" : ""} onClick={() => setTab("health")}>{t("repair")}</button>
+        </div>
+        {tab === "history" && (
+          <ol className="versions">
+            {versions?.length === 0 && <li className="peek-msg">{t("historyEmpty")}</li>}
+            {versions?.slice().reverse().map((v) => (
+              <li key={v.version}>
+                <b>{t("version", { v: num(v.version, lang) })}</b>
+                <span className="path">{new Date(v.time * 1000).toLocaleString(lang === "bn" ? "bn-BD" : undefined, { dateStyle: "medium", timeStyle: "short" })}</span>
+                <span className="vchips">
+                  {v.added.length > 0 && <span className="vchip add">+{num(v.added.length, lang)}</span>}
+                  {v.changed.length > 0 && <span className="vchip chg">~{num(v.changed.length, lang)}</span>}
+                  {v.removed.length > 0 && <span className="vchip del">−{num(v.removed.length, lang)}</span>}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+        {tab === "health" && <HealthPanel ctx={ctx} archive={info.path} />}
+        {tab === "preview" && <>
         <div className="peek-head">
-          <h2>{t("previewTitle")}</h2>
           <p>{t("previewSub")}</p>
         </div>
         <div className={`peek-box ${peek.kind}`}>
@@ -231,6 +272,7 @@ export function ArchiveView({ t, lang, info, password, skipPrograms, setSkipProg
             )}
           </dl>
         )}
+        </>}
       </aside>
     </div>
   );

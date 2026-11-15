@@ -4,6 +4,7 @@
 //! Open: ZIP, 7z, TAR, TAR.GZ, TAR.ZST, TAR.BZ2, TAR.XZ, RAR, plus split parts (.001).
 
 pub mod backup;
+pub mod cloud;
 pub mod convert;
 pub mod dupes;
 pub mod error;
