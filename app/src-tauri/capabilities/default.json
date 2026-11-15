@@ -23,6 +23,7 @@
     "notification:default",
     "core:window:allow-set-progress-bar",
     "core:window:allow-is-focused",
-    "core:window:allow-request-user-attention"
+    "core:window:allow-request-user-attention",
+    "core:window:allow-start-dragging"
   ]
 }

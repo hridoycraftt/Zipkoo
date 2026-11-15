@@ -9,6 +9,7 @@ import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { applyTheme, loadSettings, saveSettings, type Settings } from "./settings";
 import { SettingsView } from "./components/SettingsView";
+import { platform } from "./platform";
 import {
   folderAccess, folderGrant, passwordAdd, passwordFind, salvageZip, scanAvailable, virusScan,
   ARCHIVE_EXTS, EDITABLE, appInfo, editArchive, extractConflicts, trashPath, openEntry, prepareDrag, type Change, type Entry,
@@ -696,6 +697,7 @@ export default function App() {
 
   return (
     <div className={`app ${dragging ? "dragging" : ""}`}>
+      {platform === "mac" && <div className="titlebar" data-tauri-drag-region aria-hidden="true" />}
       <nav className="side" aria-label="Zipkoo">
         <div className="brand">
           <Mark size={30} />

@@ -109,12 +109,14 @@ body {
 html[lang="bn"] body { font-family: "Hind Siliguri", var(--f-ui); line-height: 1.7; }
 ::selection { background: rgb(242 169 59 / 0.35); color: var(--ink); }
 input, button, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
-:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 6px; }
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+[data-platform="linux"] :focus-visible { border-radius: 6px; }
 h1, h2, h3, p { margin: 0; }
 h1, h2 { text-wrap: balance; letter-spacing: -0.022em; }
-* { scrollbar-width: thin; scrollbar-color: var(--hair-strong) transparent; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+/* macOS keeps its own overlay scrollbars (see platform.css). */
+:root:not([data-platform="mac"]) * { scrollbar-width: thin; scrollbar-color: var(--hair-strong) transparent; }
+:root:not([data-platform="mac"]) ::-webkit-scrollbar { width: 10px; height: 10px; }
+:root:not([data-platform="mac"]) ::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .row { display: flex; align-items: center; }
 .gap { gap: 10px; flex-wrap: wrap; }
@@ -468,6 +470,11 @@ legend { font-size: 13.5px; font-weight: 650; margin-bottom: 8px; padding: 0; }
 .watch-buttons { display: inline-flex; gap: 4px; margin-left: auto; flex-wrap: nowrap; }
 .icon-btn { width: 42px; height: 42px; padding: 0; justify-content: center; }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+/* Dark: the danger red is light, so its label goes dark (white on it is only 2.3:1). */
+:root[data-theme="dark"] .btn.danger { color: #2a0b08; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.danger { color: #2a0b08; } }
+:root[data-theme="dark"] .btn.danger:hover { background: #ff958b; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.danger:hover { background: #ff958b; } }
 .btn.danger:hover { background: #a02f27; }
 .sheet .field input { height: 44px; }
 

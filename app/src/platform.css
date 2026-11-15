@@ -1,0 +1,180 @@
+/*
+  Zipkoo per platform. The brand (Haldi, Teal, Ink, Paper, the wordmark) stays the same everywhere;
+  shape, type and controls follow the host so Zipkoo feels at home:
+  - macOS: SF system font, continuous "squircle" corners, traffic lights in the content,
+    source-list sidebar, Mac push buttons, switches and alert sheets, native overlay scrollbars.
+  - Windows 11: Segoe UI Variable, Fluent 4/8px corners, flat layered surfaces, NavigationView
+    selection pill, Fluent buttons, toggles and ContentDialog (primary button first, footer band).
+  Linux keeps the Daylight theme in styles.css.
+*/
+:root { --squircle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpath d='M100.00 50.00 L99.97 65.36 L99.89 70.26 L99.75 73.81 L99.56 76.68 L99.31 79.12 L99.01 81.26 L98.64 83.17 L98.22 84.89 L97.74 86.46 L97.20 87.89 L96.60 89.21 L95.94 90.43 L95.20 91.54 L94.40 92.58 L93.53 93.53 L92.58 94.40 L91.54 95.20 L90.43 95.94 L89.21 96.60 L87.89 97.20 L86.46 97.74 L84.89 98.22 L83.17 98.64 L81.26 99.01 L79.12 99.31 L76.68 99.56 L73.81 99.75 L70.26 99.89 L65.36 99.97 L50.00 100.00 L34.64 99.97 L29.74 99.89 L26.19 99.75 L23.32 99.56 L20.88 99.31 L18.74 99.01 L16.83 98.64 L15.11 98.22 L13.54 97.74 L12.11 97.20 L10.79 96.60 L9.57 95.94 L8.46 95.20 L7.42 94.40 L6.47 93.53 L5.60 92.58 L4.80 91.54 L4.06 90.43 L3.40 89.21 L2.80 87.89 L2.26 86.46 L1.78 84.89 L1.36 83.17 L0.99 81.26 L0.69 79.12 L0.44 76.68 L0.25 73.81 L0.11 70.26 L0.03 65.36 L0.00 50.00 L0.03 34.64 L0.11 29.74 L0.25 26.19 L0.44 23.32 L0.69 20.88 L0.99 18.74 L1.36 16.83 L1.78 15.11 L2.26 13.54 L2.80 12.11 L3.40 10.79 L4.06 9.57 L4.80 8.46 L5.60 7.42 L6.47 6.47 L7.42 5.60 L8.46 4.80 L9.57 4.06 L10.79 3.40 L12.11 2.80 L13.54 2.26 L15.11 1.78 L16.83 1.36 L18.74 0.99 L20.88 0.69 L23.32 0.44 L26.19 0.25 L29.74 0.11 L34.64 0.03 L50.00 0.00 L65.36 0.03 L70.26 0.11 L73.81 0.25 L76.68 0.44 L79.12 0.69 L81.26 0.99 L83.17 1.36 L84.89 1.78 L86.46 2.26 L87.89 2.80 L89.21 3.40 L90.43 4.06 L91.54 4.80 L92.58 5.60 L93.53 6.47 L94.40 7.42 L95.20 8.46 L95.94 9.57 L96.60 10.79 L97.20 12.11 L97.74 13.54 L98.22 15.11 L98.64 16.83 L99.01 18.74 L99.31 20.88 L99.56 23.32 L99.75 26.19 L99.89 29.74 L99.97 34.64 L100.00 50.00Z'/%3E%3C/svg%3E"); }
+
+/* ================================ macOS ================================ */
+:root[data-platform="mac"] {
+  --f-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hind Siliguri", "Bangla Sangam MN", sans-serif;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --side: rgb(236 234 228 / 0.92);
+  --shadow-pane: 0 0 0 0.5px rgb(20 22 31 / 0.08), 0 1px 3px rgb(20 22 31 / 0.06), 0 8px 24px -12px rgb(40 34 20 / 0.14);
+  --shadow-btn: 0 0 0 0.5px rgb(20 22 31 / 0.14), 0 1px 1px rgb(20 22 31 / 0.08);
+  --mac-focus: 0 0 0 3.5px rgb(23 120 106 / 0.45);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-platform="mac"]:not([data-theme="light"]) { --side: rgb(30 31 38 / 0.94); --shadow-btn: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 1px 1px rgb(0 0 0 / 0.3); }
+}
+:root[data-platform="mac"][data-theme="dark"] { --side: rgb(30 31 38 / 0.94); --shadow-btn: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 1px 1px rgb(0 0 0 / 0.3); }
+
+[data-platform="mac"] body { font-size: 13.5px; line-height: 1.5; letter-spacing: 0; font-feature-settings: normal; }
+[data-platform="mac"] h1, [data-platform="mac"] h2 { letter-spacing: -0.012em; }
+[data-platform="mac"] .dock h1 { letter-spacing: -0.02em; }
+
+/* Title bar: the window has no title strip; this band is where it's dragged from. */
+[data-platform="mac"] .titlebar { position: fixed; inset: 0 0 auto 0; height: 34px; z-index: 5; }
+[data-platform="mac"] .side { padding-top: 46px; }
+[data-platform="mac"] .content { padding-top: 34px; }
+
+/* Source-list sidebar: small rows, accent-tinted icons, a soft rounded selection. */
+[data-platform="mac"] .nav { padding: 5px 9px; font-size: 13.5px; gap: 8px; }
+[data-platform="mac"] .nav svg { color: var(--haldi-deep); }
+[data-platform="mac"] .nav.on { background: rgb(20 22 31 / 0.08); box-shadow: none; font-weight: 600; }
+:root[data-platform="mac"][data-theme="dark"] .nav.on { background: rgb(255 255 255 / 0.1); }
+@media (prefers-color-scheme: dark) { :root[data-platform="mac"]:not([data-theme="light"]) .nav.on { background: rgb(255 255 255 / 0.1); } }
+[data-platform="mac"] .side-label { font-size: 11px; font-weight: 700; padding: 16px 10px 4px; }
+
+/* Push buttons. */
+[data-platform="mac"] .btn { height: 30px; padding: 0 13px; border-radius: 7px; font-size: 13.5px; font-weight: 500; border: 0; box-shadow: var(--shadow-btn); }
+[data-platform="mac"] .btn:not(.primary):not(.danger):not(.quiet) { background: var(--pane); }
+[data-platform="mac"] .btn.danger { box-shadow: 0 0 0 0.5px rgb(120 20 10 / 0.4), 0 1px 1px rgb(20 22 31 / 0.1); font-weight: 600; }
+[data-platform="mac"] .btn:hover { box-shadow: var(--shadow-btn); filter: brightness(0.98); }
+[data-platform="mac"] .btn:active { transform: none; filter: brightness(0.93); }
+[data-platform="mac"] .btn.primary { box-shadow: 0 0 0 0.5px rgb(143 86 10 / 0.35), 0 1px 1px rgb(20 22 31 / 0.1); font-weight: 600; }
+[data-platform="mac"] .btn.quiet { box-shadow: none; background: transparent; }
+[data-platform="mac"] .btn.small { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; }
+[data-platform="mac"] .dock .btn { height: 34px; padding: 0 16px; border-radius: 8px; }
+
+/* Focus: the Mac's soft accent ring, hugging the control's own shape. */
+[data-platform="mac"] :focus-visible { outline: none; box-shadow: var(--mac-focus); }
+[data-platform="mac"] .switch input:focus-visible + .track { outline: none; box-shadow: var(--mac-focus); }
+
+/* Continuous corners. Real squircles where the engine draws them, a superellipse mask on tiles. */
+@supports (corner-shape: squircle) {
+  [data-platform="mac"] :is(.main-col, .peek, .dock, .sheet, .btn, .row-item, .seg, .search, .recent-item, .notice, .peek-box) { corner-shape: squircle; }
+}
+[data-platform="mac"] :is(.ficon, .dialog-icon, .dock-mark, .brand svg) { border-radius: 0; -webkit-mask: var(--squircle) center / 100% 100% no-repeat; mask: var(--squircle) center / 100% 100% no-repeat; }
+[data-platform="mac"] .dock-mark { box-shadow: none; filter: drop-shadow(0 8px 18px rgb(214 140 30 / 0.4)); }
+
+/* Panes and lists. */
+[data-platform="mac"] .main-col, [data-platform="mac"] .peek { border-radius: 12px; }
+[data-platform="mac"] .dock { border-radius: 14px; }
+[data-platform="mac"] .row-item { height: 44px; border-radius: 6px; }
+[data-platform="mac"] .row-item.focus { background: var(--haldi); }
+[data-platform="mac"] .row-item.focus .leaf, [data-platform="mac"] .row-item.focus .c-size { color: var(--on-accent); }
+[data-platform="mac"] .ficon { width: 28px; height: 28px; }
+[data-platform="mac"] .list-head { height: 28px; font-size: 11.5px; }
+[data-platform="mac"] .search { height: 30px; border-radius: 7px; }
+[data-platform="mac"] .search:focus-within { box-shadow: var(--mac-focus); border-color: transparent; }
+
+/* Segmented control and switch, Mac proportions. */
+[data-platform="mac"] .seg { border-radius: 8px; padding: 2px; border: 0; background: rgb(20 22 31 / 0.06); }
+[data-platform="mac"] .seg button { height: 24px; border-radius: 6px; padding: 0 12px; font-size: 13px; font-weight: 500; }
+[data-platform="mac"] .seg button.on { box-shadow: 0 0 0 0.5px rgb(20 22 31 / 0.1), 0 1px 2px rgb(20 22 31 / 0.12); }
+[data-platform="mac"] .switch .track { width: 38px; height: 22px; }
+[data-platform="mac"] .switch .track::after { top: 2px; left: 2px; width: 18px; height: 18px; box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 2px 4px rgb(0 0 0 / 0.2); }
+[data-platform="mac"] .switch input:checked + .track::after { transform: translateX(16px); }
+
+/* Alert sheets: centered icon, title and text, buttons at the bottom right. */
+[data-platform="mac"] .sheet { border-radius: 16px; padding: 22px; gap: 14px; }
+[data-platform="mac"] .sheet.narrow { width: min(380px, 100%); }
+[data-platform="mac"] .sheet h2 { font-size: 15px; font-weight: 700; }
+[data-platform="mac"] .sheet > p, [data-platform="mac"] .sheet p { font-size: 13px; }
+[data-platform="mac"] .sheet .row.end .btn { min-width: 76px; justify-content: center; }
+[data-platform="mac"] .scrim { backdrop-filter: none; background: rgb(20 22 31 / 0.18); }
+[data-platform="mac"] input[type="password"], [data-platform="mac"] .pw-add input { height: 30px; border-radius: 6px; }
+[data-platform="mac"] .sheet input[type="password"]:focus, [data-platform="mac"] .pw-add input:focus { box-shadow: var(--mac-focus); border-color: transparent; }
+
+/* =============================== Windows 11 =============================== */
+:root[data-platform="windows"] {
+  --f-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Hind Siliguri", "Nirmala UI", sans-serif;
+  --r-sm: 4px;
+  --r-md: 4px;
+  --r-lg: 8px;
+  --stroke: rgb(0 0 0 / 0.0578);
+  --stroke-strong: rgb(0 0 0 / 0.1622);
+  --shadow-pane: 0 0 0 1px var(--stroke), 0 2px 4px rgb(0 0 0 / 0.04);
+  --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.1), 0 32px 64px rgb(0 0 0 / 0.19), 0 2px 21px rgb(0 0 0 / 0.15);
+}
+:root[data-platform="windows"][data-theme="dark"] { --stroke: rgb(255 255 255 / 0.0698); --stroke-strong: rgb(255 255 255 / 0.093); }
+@media (prefers-color-scheme: dark) { :root[data-platform="windows"]:not([data-theme="light"]) { --stroke: rgb(255 255 255 / 0.0698); --stroke-strong: rgb(255 255 255 / 0.093); } }
+
+/* Mica: a flat, quiet backdrop instead of the warm glows. */
+[data-platform="windows"] body { font-size: 14px; line-height: 1.43; letter-spacing: 0; font-feature-settings: normal; background: var(--canvas); }
+[data-platform="windows"] h1, [data-platform="windows"] h2 { letter-spacing: 0; font-weight: 600; }
+[data-platform="windows"] .dock h1 { font-family: "Segoe UI Variable Display", var(--f-ui); font-size: 28px; }
+[data-platform="windows"] .title { font-family: "Segoe UI Variable Display", var(--f-ui); font-weight: 600; }
+[data-platform="windows"] .side { border-right: 0; background: transparent; }
+[data-platform="windows"] .side-foot { background: var(--canvas); }
+
+/* NavigationView: subtle fill on hover and selection, accent pill on the selected item. */
+[data-platform="windows"] .nav { position: relative; border-radius: 4px; padding: 9px 12px; }
+[data-platform="windows"] .nav.on { background: var(--hover); box-shadow: none; font-weight: 600; }
+[data-platform="windows"] .nav.on::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 3px; background: var(--haldi-deep); }
+[data-platform="windows"] .nav svg { color: var(--ink-2); }
+[data-platform="windows"] .nav.on svg { color: var(--ink); }
+
+/* Fluent buttons: hairline stroke with a deeper bottom edge; accent fill for the main one. */
+[data-platform="windows"] .btn { height: 32px; padding: 0 12px; border-radius: 4px; font-size: 14px; font-weight: 400; border: 1px solid var(--stroke); border-bottom-color: var(--stroke-strong); box-shadow: none; }
+[data-platform="windows"] .btn:not(.primary):not(.danger):not(.quiet) { background: var(--pane); }
+[data-platform="windows"] .btn:not(.primary):not(.danger):not(.quiet):hover { box-shadow: none; background: var(--pane-2); border-color: var(--stroke); border-bottom-color: var(--stroke-strong); }
+[data-platform="windows"] .btn:not(.primary):not(.danger):not(.quiet):active { transform: none; color: var(--ink-2); background: var(--pane-2); border-bottom-color: var(--stroke); }
+[data-platform="windows"] .btn.primary { background: var(--haldi); border-color: rgb(255 255 255 / 0.08); border-bottom-color: rgb(0 0 0 / 0.4); font-weight: 600; }
+[data-platform="windows"] .btn.primary:hover { background: #e9a234; }
+[data-platform="windows"] .btn.danger { border-color: rgb(255 255 255 / 0.08); border-bottom-color: rgb(0 0 0 / 0.4); font-weight: 600; }
+[data-platform="windows"] .btn:active { transform: none; }
+[data-platform="windows"] .btn.quiet { border-color: transparent; background: transparent; }
+[data-platform="windows"] .btn.quiet:hover { background: var(--hover); }
+[data-platform="windows"] .btn.small { height: 28px; border-radius: 4px; font-size: 13px; }
+[data-platform="windows"] .dock .btn { height: 36px; padding: 0 16px; }
+
+/* Focus visual: Fluent's two-tone ring, sharp and on the outside. */
+[data-platform="windows"] :focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; box-shadow: 0 0 0 1px var(--pane); }
+[data-platform="windows"] .switch input:focus-visible + .track { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* Layers: flat cards with a hairline, 8px corners. */
+[data-platform="windows"] .main-col, [data-platform="windows"] .peek, [data-platform="windows"] .dock { border-radius: 8px; box-shadow: var(--shadow-pane); }
+[data-platform="windows"] .dock::after { border-radius: 6px; }
+[data-platform="windows"] .dock-mark { border-radius: 12px; box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.2); }
+[data-platform="windows"] .ficon { border-radius: 4px; width: 32px; height: 32px; }
+[data-platform="windows"] .dialog-icon { border-radius: 8px; }
+[data-platform="windows"] .row-item { height: 44px; border-radius: 4px; position: relative; }
+[data-platform="windows"] .row-item.focus { background: var(--hover); }
+[data-platform="windows"] .row-item.focus .leaf { color: var(--ink); }
+[data-platform="windows"] .row-item.focus::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 3px; background: var(--haldi-deep); }
+[data-platform="windows"] .actions { background: var(--pane-2); }
+[data-platform="windows"] .search { height: 32px; border-radius: 4px; background: var(--pane); border: 1px solid var(--stroke); border-bottom: 1px solid var(--stroke-strong); }
+[data-platform="windows"] .search:focus-within { box-shadow: inset 0 -2px 0 var(--haldi-deep); border-color: var(--stroke); }
+[data-platform="windows"] input[type="password"], [data-platform="windows"] .pw-add input { height: 32px; border-radius: 4px; border: 1px solid var(--stroke); border-bottom-color: var(--stroke-strong); }
+[data-platform="windows"] .sheet input[type="password"]:focus, [data-platform="windows"] .pw-add input:focus { box-shadow: inset 0 -2px 0 var(--haldi-deep); border-color: var(--stroke); }
+[data-platform="windows"] .recent-item, [data-platform="windows"] .notice, [data-platform="windows"] .peek-box { border-radius: 4px; }
+
+/* Segmented control → Fluent selector bar; toggle → Fluent ToggleSwitch. */
+[data-platform="windows"] .seg { border-radius: 4px; border: 1px solid var(--stroke); background: var(--pane-2); }
+[data-platform="windows"] .seg button { border-radius: 3px; height: 28px; font-weight: 400; }
+[data-platform="windows"] .seg button.on { font-weight: 600; box-shadow: 0 0 0 1px var(--stroke); }
+[data-platform="windows"] .switch .track { width: 40px; height: 20px; background: transparent; box-shadow: inset 0 0 0 1px var(--ink-2); }
+[data-platform="windows"] .switch .track::after { top: 4px; left: 4px; width: 12px; height: 12px; background: var(--ink-2); box-shadow: none; transition: transform 0.18s var(--ease), width 0.12s, height 0.12s; }
+[data-platform="windows"] .switch:hover .track::after { width: 14px; height: 14px; top: 3px; left: 3px; }
+[data-platform="windows"] .switch input:checked + .track { background: var(--haldi-deep); box-shadow: none; }
+[data-platform="windows"] .switch input:checked + .track::after { background: #fff; transform: translateX(20px); }
+
+/* ContentDialog: title and text on top, a footer band with the primary button first. */
+[data-platform="windows"] .scrim { backdrop-filter: none; background: rgb(0 0 0 / 0.3); }
+[data-platform="windows"] .sheet { border-radius: 8px; padding: 24px 24px 0; gap: 12px; }
+[data-platform="windows"] .sheet h2 { font-size: 20px; font-weight: 600; }
+[data-platform="windows"] .sheet .row.end:last-child { flex-direction: row-reverse; justify-content: flex-end; flex-wrap: nowrap; margin: 12px -24px 0; padding: 24px; background: var(--pane-2); border-top: 1px solid var(--stroke); position: sticky; bottom: 0; }
+[data-platform="windows"] .sheet .row.end:last-child .btn { flex: 1; justify-content: center; }
+[data-platform="windows"] .sheet .row.end:last-child .link { flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-platform] .switch .track::after { transition: none; }
+}
