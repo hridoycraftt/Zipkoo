@@ -13,6 +13,8 @@ use std::sync::atomic::AtomicBool;
 
 pub const MAGIC: &[u8; 8] = b"ZKSFX\x01\0\0";
 pub const TRAILER_LEN: u64 = 16;
+/// Windows refuses to start programs of 4 GB or more.
+pub const MAX_EXE: u64 = (4 << 30) - (1 << 20);
 
 /// Build `output` (an .exe on Windows) from `stub` plus a ZIP of `inputs`.
 /// Uses ZIP so the payload can be password-protected with AES-256.
@@ -27,10 +29,20 @@ pub fn build(
     if !stub.is_file() {
         return Err(Error::Io(io::Error::new(io::ErrorKind::NotFound, format!("SFX stub not found: {}", stub.display()))));
     }
+    // Quick check before spending time packing: stored size can't be below the input once
+    // nothing compresses, so only refuse up front when even a 4x squeeze couldn't fit.
+    let input: u64 = inputs.iter().map(|p| dir_size(p)).sum();
+    if input / 4 > MAX_EXE {
+        return Err(Error::SfxTooBig);
+    }
     let payload = output.with_extension("sfx-payload.zip");
     let zip_opts = PackOptions { format: Format::Zip, split_size: None, hide_names: false, ..opts.clone() };
     let mut report = pack(inputs, &payload, &zip_opts, on_progress, cancel)?;
     let res = (|| -> Result<u64> {
+        let total = fs::metadata(stub)?.len() + fs::metadata(&payload)?.len() + TRAILER_LEN;
+        if total > MAX_EXE {
+            return Err(Error::SfxTooBig);
+        }
         let tmp = output.with_extension("exe.part");
         {
             let mut out = BufWriter::new(File::create(&tmp)?);
@@ -115,4 +127,13 @@ impl<R: Read + Seek> Seek for Window<R> {
         self.inner.seek(SeekFrom::Start(self.start + self.pos))?;
         Ok(self.pos)
     }
+}
+
+fn dir_size(p: &Path) -> u64 {
+    walkdir::WalkDir::new(p)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok().map(|m| m.len()))
+        .sum()
 }

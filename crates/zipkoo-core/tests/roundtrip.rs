@@ -304,3 +304,62 @@ fn cancel_leaves_no_partial_archive() {
     assert!(!out.exists());
     assert_eq!(fs::read_dir(t.path()).unwrap().count(), 1);
 }
+
+/// 20 GB through ZIP64 and 7z: pack, list, then stream every byte back out (checksums verified)
+/// without needing 20 GB of free space for the output.
+/// `cargo test -p zipkoo-core --release -- --ignored twenty`
+#[test]
+#[ignore]
+fn twenty_gb_file() {
+    use std::io::{Read, Seek, SeekFrom};
+    let t = tempfile::tempdir().unwrap();
+    let root = t.path().join("Video");
+    fs::create_dir_all(&root).unwrap();
+    let size: u64 = 20 << 30;
+    {
+        let mut f = fs::File::create(root.join("raw.mov")).unwrap();
+        f.set_len(size).unwrap();
+        f.write_all(b"ZIPKOO-START").unwrap();
+        f.seek(SeekFrom::Start(size - 10)).unwrap();
+        f.write_all(b"ZIPKOO-END").unwrap();
+    }
+    // ".mov" would be stored as-is by Smart Compress; turn it off so the data really compresses.
+    for format in [Format::Zip, Format::SevenZ] {
+        let out = t.path().join(format!("v.{}", format.extension()));
+        let opts = PackOptions { format, level: Level::Fast, smart: false, ..Default::default() };
+        let rep = pack(&[root.clone()], &out, &opts, &mut |_| {}, None).unwrap();
+        assert_eq!(rep.input_bytes, size);
+        let info = inspect(&out, None).unwrap();
+        assert_eq!(info.total_size, size, "{format:?}");
+        let mut seen = 0u64;
+        let mut tail = Vec::new();
+        let mut head = Vec::new();
+        let mut consume = |r: &mut dyn Read| {
+            let mut buf = vec![0u8; 1 << 20];
+            loop {
+                let n = r.read(&mut buf).unwrap();
+                if n == 0 { break; }
+                if head.is_empty() { head.extend_from_slice(&buf[..12.min(n)]); }
+                seen += n as u64;
+                tail.extend_from_slice(&buf[..n]);
+                if tail.len() > 64 { tail.drain(..tail.len() - 64); }
+            }
+        };
+        match format {
+            Format::Zip => {
+                let mut z = zip::ZipArchive::new(fs::File::open(&out).unwrap()).unwrap();
+                let idx = z.index_for_name("Video/raw.mov").unwrap();
+                let mut f = z.by_index(idx).unwrap();
+                consume(&mut f); // the zip crate checks the CRC when the entry ends
+            }
+            _ => {
+                let mut r = sevenz_rust2::ArchiveReader::open(&out, sevenz_rust2::Password::empty()).unwrap();
+                r.for_each_entries(|e, rd| { if !e.is_directory { consume(rd); } Ok(true) }).unwrap();
+            }
+        }
+        assert_eq!(seen, size, "{format:?}");
+        assert_eq!(&head, b"ZIPKOO-START");
+        assert!(tail.ends_with(b"ZIPKOO-END"), "{format:?}");
+        fs::remove_file(&out).unwrap();
+    }
+}

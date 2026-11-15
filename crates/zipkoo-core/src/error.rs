@@ -28,6 +28,8 @@ pub enum Error {
     Damaged(String),
     #[error("Not enough free space: this needs {need} bytes, but only {free} bytes are free.")]
     NoSpace { need: u64, free: u64 },
+    #[error("Self-extracting .exe files can be at most 4 GB, because Windows won't run bigger programs. Use 7z with Split into parts instead.")]
+    SfxTooBig,
     #[error("Cancelled")]
     Cancelled,
 }

@@ -68,3 +68,14 @@ fn payload_is_found_by_core() {
     assert_eq!(off, fs::metadata(stub()).unwrap().len());
     assert!(len > 0);
 }
+
+#[test]
+fn refuses_exe_over_4gb_before_packing() {
+    let t = tempfile::tempdir().unwrap();
+    let big = t.path().join("big.bin");
+    // Sparse 20 GB file: takes no real disk space.
+    fs::File::create(&big).unwrap().set_len(20 << 30).unwrap();
+    let e = sfx::build(&stub(), &[big], &t.path().join("big.exe"), &PackOptions::default(), &mut |_| {}, None).unwrap_err();
+    assert!(matches!(e, zipkoo_core::Error::SfxTooBig), "{e:?}");
+    assert!(!t.path().join("big.exe").exists());
+}
